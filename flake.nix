@@ -60,10 +60,10 @@
           mkdir -p build/classes build/native-image build/lib build/javafx-modules
 
           find src/main/java -name '*.java' | sort > build/sources.txt
-          ln -s ${jtoml-all} build/lib/jtoml-all.jar
-          ln -s ${javafx-base} build/javafx-modules/javafx-base.jar
-          ln -s ${javafx-controls} build/javafx-modules/javafx-controls.jar
-          ln -s ${javafx-graphics} build/javafx-modules/javafx-graphics.jar
+          cp ${jtoml-all} build/lib/jtoml-all.jar
+          cp ${javafx-base} build/javafx-modules/javafx-base.jar
+          cp ${javafx-controls} build/javafx-modules/javafx-controls.jar
+          cp ${javafx-graphics} build/javafx-modules/javafx-graphics.jar
           javafx_module_path="build/javafx-modules"
 
           jlib_classpath="$(
@@ -93,9 +93,8 @@
             --module-path "$javafx_module_path" \
             --add-modules javafx.controls,javafx.graphics \
             -cp "$app_classpath" \
-            -H:Name=jprototerm \
             -H:Class=com.gregor.jprototerm.Main \
-            -H:Path=build/native-image
+            -o build/native-image/jprototerm
 
           runHook postBuild
         '';

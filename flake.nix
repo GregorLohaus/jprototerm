@@ -43,6 +43,39 @@
       graalvm = pkgs.graalvmPackages.graalvm-ce;
       gradle = if pkgs ? gradle_9 then pkgs.gradle_9 else pkgs.gradle;
       openjfx = pkgs.javaPackages.openjfx25;
+      javafxNativeLibraryPath = pkgs.lib.concatStringsSep ":" [
+        "${openjfx}/modules_libs/javafx.base"
+        "${openjfx}/modules_libs/javafx.graphics"
+        "${openjfx}/modules_libs/javafx.media"
+      ];
+      runtimeLibraryPath = pkgs.lib.makeLibraryPath ([
+        openjfx
+        jlib
+        pkgs.gtk3
+        pkgs.glib
+        pkgs.pango
+        pkgs.cairo
+        pkgs.gdk-pixbuf
+        pkgs.harfbuzz
+        pkgs.freetype
+        pkgs.fontconfig
+        pkgs.libxkbcommon
+        pkgs.zlib
+        pkgs.stdenv.cc.cc.lib
+        pkgs.xorg.libX11
+        pkgs.xorg.libXext
+        pkgs.xorg.libXrender
+        pkgs.xorg.libXtst
+        pkgs.xorg.libXi
+        pkgs.xorg.libXcursor
+        pkgs.xorg.libXrandr
+        pkgs.xorg.libXinerama
+        pkgs.xorg.libxcb
+      ]
+      ++ pkgs.lib.optionals (pkgs ? atk) [ pkgs.atk ]
+      ++ pkgs.lib.optionals (pkgs.xorg ? libXxf86vm) [ pkgs.xorg.libXxf86vm ]
+      ++ pkgs.lib.optionals (pkgs ? libGL) [ pkgs.libGL ]
+      ++ pkgs.lib.optionals (pkgs ? mesa) [ pkgs.mesa ]);
     in {
       packages.${system}.default = pkgs.stdenvNoCC.mkDerivation {
         pname = "jprototerm";
@@ -90,6 +123,7 @@
           native-image \
             --no-fallback \
             --enable-native-access=javafx.graphics \
+            -Djava.library.path=${javafxNativeLibraryPath} \
             --module-path "$javafx_module_path" \
             --add-modules javafx.controls,javafx.graphics \
             -cp "$app_classpath" \
@@ -108,7 +142,10 @@
           wrapProgram $out/bin/jprototerm \
             --set GDK_BACKEND x11 \
             --set JAVA_TOOL_OPTIONS "-Dprism.order=es2,sw -Dprism.verbose=true" \
-            --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ openjfx jlib ]}:${openjfx}/modules_libs/javafx.graphics \
+            --add-flags "-Djava.library.path=${javafxNativeLibraryPath}" \
+            --add-flags "-Dprism.order=es2,sw" \
+            --add-flags "-Dprism.verbose=true" \
+            --prefix LD_LIBRARY_PATH : ${javafxNativeLibraryPath}:${runtimeLibraryPath} \
             --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.util-linux pkgs.bash ]}
 
           runHook postInstall

@@ -37,6 +37,13 @@
           mkdir -p build/classes build/native-image
 
           find src/main/java -name '*.java' | sort > build/sources.txt
+          javafx_lib="$(find ${openjfx} -type f -name 'javafx.graphics.jar' -printf '%h\n' | head -n1)"
+          if [ -z "$javafx_lib" ]; then
+            echo "Could not find javafx.graphics.jar under ${openjfx}" >&2
+            find ${openjfx} -maxdepth 4 -type f | sort >&2
+            exit 1
+          fi
+
           jlib_classpath="$(
             find ${jlib}/maven -type f -name '*.jar' \
               ! -name '*-sources.jar' \
@@ -48,7 +55,7 @@
 
           javac \
             --release 25 \
-            --module-path ${openjfx}/lib \
+            --module-path "$javafx_lib" \
             --add-modules javafx.controls,javafx.graphics \
             -cp "${jtoml-all}:$jlib_classpath" \
             -d build/classes \
@@ -61,7 +68,7 @@
           native-image \
             --no-fallback \
             --enable-url-protocols=file \
-            --module-path ${openjfx}/lib \
+            --module-path "$javafx_lib" \
             --add-modules javafx.controls,javafx.graphics \
             -cp "$app_classpath" \
             -H:Name=jprototerm \

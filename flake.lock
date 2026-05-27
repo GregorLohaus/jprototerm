@@ -83,6 +83,18 @@
         "url": "https://gitea.gregorlohaus.com/gregor/jlibghostty.git"
       }
     },
+    "jtoml-all": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-KWrUaDVmnWzdkQxjgPFFNl8DOEvkCqWW3OmXU2sZHKw=",
+        "type": "file",
+        "url": "https://repo.maven.apache.org/maven2/io/github/wasabithumb/jtoml-all/1.5.2/jtoml-all-1.5.2.jar"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://repo.maven.apache.org/maven2/io/github/wasabithumb/jtoml-all/1.5.2/jtoml-all-1.5.2.jar"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1779560665,
@@ -118,6 +130,7 @@
     "root": {
       "inputs": {
         "jlibghostty": "jlibghostty",
+        "jtoml-all": "jtoml-all",
         "nixpkgs": "nixpkgs_2"
       }
     },

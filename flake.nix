@@ -13,6 +13,7 @@
 
       jlib = jlibghostty.packages.${system}.jlibghostty;
       graalvm = pkgs.graalvmPackages.graalvm-ce;
+      gradle = if pkgs ? gradle_9 then pkgs.gradle_9 else pkgs.gradle;
     in {
       packages.${system}.default = pkgs.stdenvNoCC.mkDerivation {
         pname = "jprototerm";
@@ -21,7 +22,7 @@
 
         nativeBuildInputs = [
           graalvm
-          pkgs.gradle
+          gradle
           pkgs.makeWrapper
         ];
 
@@ -34,6 +35,7 @@
 
           gradle \
             --no-daemon \
+            --stacktrace \
             -PjlibghosttyMavenRepo=${jlib}/maven \
             nativeCompile
 
@@ -57,7 +59,7 @@
       devShells.${system}.default = pkgs.mkShell {
         packages = [
           graalvm
-          pkgs.gradle
+          gradle
           pkgs.util-linux
         ];
 

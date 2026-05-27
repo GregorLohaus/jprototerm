@@ -1,5 +1,25 @@
 [
   {
+    "name": "java.lang.Object",
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "java.lang.String",
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "java.lang.Runnable",
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "java.lang.Thread",
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
     "name": "java.nio.Buffer",
     "allPublicMethods": true,
     "allDeclaredMethods": true
@@ -48,6 +68,54 @@
   },
   {
     "name": "com.sun.glass.ui.gtk.GtkView",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.sun.glass.ui.Application",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.sun.glass.ui.Window",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.sun.glass.ui.View",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.sun.glass.ui.Screen",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.sun.glass.ui.Pixels",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.sun.glass.ui.Clipboard",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.sun.glass.ui.Cursor",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.sun.glass.ui.CommonDialogs",
     "allDeclaredConstructors": true,
     "allPublicMethods": true,
     "allDeclaredMethods": true

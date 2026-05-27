@@ -64,6 +64,42 @@
         "type": "github"
       }
     },
+    "javafx-base": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-96fttJUts/rFwKB7u5G8NWkK2NjJ3a6eIKbe1RTWkmM=",
+        "type": "file",
+        "url": "https://repo.maven.apache.org/maven2/org/openjfx/javafx-base/25/javafx-base-25-linux.jar"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://repo.maven.apache.org/maven2/org/openjfx/javafx-base/25/javafx-base-25-linux.jar"
+      }
+    },
+    "javafx-controls": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-2Cdc2/hPOjJmQidDjXu9vnlwAuawLn0cg/tLhzFfkUs=",
+        "type": "file",
+        "url": "https://repo.maven.apache.org/maven2/org/openjfx/javafx-controls/25/javafx-controls-25-linux.jar"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://repo.maven.apache.org/maven2/org/openjfx/javafx-controls/25/javafx-controls-25-linux.jar"
+      }
+    },
+    "javafx-graphics": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-w01IhRAQzcfTvwkqIQkjrI8ZPXT0VTEeijfzbqp3G0k=",
+        "type": "file",
+        "url": "https://repo.maven.apache.org/maven2/org/openjfx/javafx-graphics/25/javafx-graphics-25-linux.jar"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://repo.maven.apache.org/maven2/org/openjfx/javafx-graphics/25/javafx-graphics-25-linux.jar"
+      }
+    },
     "jlibghostty": {
       "inputs": {
         "ghostty": "ghostty",
@@ -129,6 +165,9 @@
     },
     "root": {
       "inputs": {
+        "javafx-base": "javafx-base",
+        "javafx-controls": "javafx-controls",
+        "javafx-graphics": "javafx-graphics",
         "jlibghostty": "jlibghostty",
         "jtoml-all": "jtoml-all",
         "nixpkgs": "nixpkgs_2"

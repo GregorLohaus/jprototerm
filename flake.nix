@@ -57,10 +57,14 @@
         buildPhase = ''
           runHook preBuild
 
-          mkdir -p build/classes build/native-image
+          mkdir -p build/classes build/native-image build/lib build/javafx-modules
 
           find src/main/java -name '*.java' | sort > build/sources.txt
-          javafx_module_path="${javafx-base}:${javafx-controls}:${javafx-graphics}"
+          ln -s ${jtoml-all} build/lib/jtoml-all.jar
+          ln -s ${javafx-base} build/javafx-modules/javafx-base.jar
+          ln -s ${javafx-controls} build/javafx-modules/javafx-controls.jar
+          ln -s ${javafx-graphics} build/javafx-modules/javafx-graphics.jar
+          javafx_module_path="build/javafx-modules"
 
           jlib_classpath="$(
             find ${jlib}/maven -type f -name '*.jar' \
@@ -69,13 +73,13 @@
               | sort \
               | paste -sd: -
           )"
-          app_classpath="build/classes:${jtoml-all}:$jlib_classpath:${javafx-base}:${javafx-controls}:${javafx-graphics}"
+          app_classpath="build/classes:build/lib/jtoml-all.jar:$jlib_classpath:build/javafx-modules/javafx-base.jar:build/javafx-modules/javafx-controls.jar:build/javafx-modules/javafx-graphics.jar"
 
           javac \
             --release 25 \
             --module-path "$javafx_module_path" \
             --add-modules javafx.controls,javafx.graphics \
-            -cp "${jtoml-all}:$jlib_classpath" \
+            -cp "build/lib/jtoml-all.jar:$jlib_classpath" \
             -d build/classes \
             @build/sources.txt
 

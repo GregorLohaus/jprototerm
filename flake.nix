@@ -37,9 +37,9 @@
           mkdir -p build/classes build/native-image
 
           find src/main/java -name '*.java' | sort > build/sources.txt
-          javafx_lib="$(find ${openjfx} -type f -name 'javafx.graphics.jar' -printf '%h\n' | head -n1)"
-          if [ -z "$javafx_lib" ]; then
-            echo "Could not find javafx.graphics.jar under ${openjfx}" >&2
+          javafx_module_path="${openjfx}/jmods"
+          if [ ! -f "$javafx_module_path/javafx.graphics.jmod" ]; then
+            echo "Could not find javafx.graphics.jmod under $javafx_module_path" >&2
             find ${openjfx} -maxdepth 4 -type f | sort >&2
             exit 1
           fi
@@ -55,7 +55,7 @@
 
           javac \
             --release 25 \
-            --module-path "$javafx_lib" \
+            --module-path "$javafx_module_path" \
             --add-modules javafx.controls,javafx.graphics \
             -cp "${jtoml-all}:$jlib_classpath" \
             -d build/classes \
@@ -68,7 +68,7 @@
           native-image \
             --no-fallback \
             --enable-url-protocols=file \
-            --module-path "$javafx_lib" \
+            --module-path "$javafx_module_path" \
             --add-modules javafx.controls,javafx.graphics \
             -cp "$app_classpath" \
             -H:Name=jprototerm \
@@ -86,7 +86,7 @@
 
           wrapProgram $out/bin/jprototerm \
             --set GDK_BACKEND x11 \
-            --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ openjfx jlib ]} \
+            --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ openjfx jlib ]}:${openjfx}/modules_libs/javafx.graphics \
             --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.util-linux pkgs.bash ]}
 
           runHook postInstall

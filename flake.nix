@@ -48,6 +48,8 @@
         "${openjfx}/modules_libs/javafx.graphics"
         "${openjfx}/modules_libs/javafx.media"
       ];
+      x11 = name: oldName:
+        if pkgs ? ${name} then pkgs.${name} else pkgs.xorg.${oldName};
       runtimeLibraryPath = pkgs.lib.makeLibraryPath ([
         openjfx
         jlib
@@ -62,18 +64,18 @@
         pkgs.libxkbcommon
         pkgs.zlib
         pkgs.stdenv.cc.cc.lib
-        pkgs.xorg.libX11
-        pkgs.xorg.libXext
-        pkgs.xorg.libXrender
-        pkgs.xorg.libXtst
-        pkgs.xorg.libXi
-        pkgs.xorg.libXcursor
-        pkgs.xorg.libXrandr
-        pkgs.xorg.libXinerama
-        pkgs.xorg.libxcb
+        (x11 "libx11" "libX11")
+        (x11 "libxext" "libXext")
+        (x11 "libxrender" "libXrender")
+        (x11 "libxtst" "libXtst")
+        (x11 "libxi" "libXi")
+        (x11 "libxcursor" "libXcursor")
+        (x11 "libxrandr" "libXrandr")
+        (x11 "libxinerama" "libXinerama")
+        (x11 "libxcb" "libxcb")
       ]
       ++ pkgs.lib.optionals (pkgs ? atk) [ pkgs.atk ]
-      ++ pkgs.lib.optionals (pkgs.xorg ? libXxf86vm) [ pkgs.xorg.libXxf86vm ]
+      ++ pkgs.lib.optionals (pkgs ? libxxf86vm || pkgs.xorg ? libXxf86vm) [ (x11 "libxxf86vm" "libXxf86vm") ]
       ++ pkgs.lib.optionals (pkgs ? libGL) [ pkgs.libGL ]
       ++ pkgs.lib.optionals (pkgs ? mesa) [ pkgs.mesa ]);
     in {

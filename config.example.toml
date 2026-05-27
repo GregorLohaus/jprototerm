@@ -1,0 +1,20 @@
+[terminal]
+columns = 100
+rows = 30
+shell = "/bin/bash"
+font_family = "JetBrainsMono Nerd Font"
+font_size = 15
+
+[window]
+width = 1200
+height = 760
+
+[kitty_graphics]
+enabled = true
+
+[keybindings]
+navigate_left = "ALT+H"
+navigate_down = "ALT+J"
+navigate_up = "ALT+K"
+navigate_right = "ALT+L"
+toggle_floating = "ALT+F"

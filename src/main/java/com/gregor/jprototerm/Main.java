@@ -78,6 +78,6 @@ public final class Main extends Application {
     }
 
     public static void main(String[] args) {
-        launch(args);
+        launch(Main.class, args);
     }
 }

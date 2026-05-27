@@ -9,9 +9,32 @@
       url = "https://repo.maven.apache.org/maven2/io/github/wasabithumb/jtoml-all/1.5.2/jtoml-all-1.5.2.jar";
       flake = false;
     };
+
+    javafx-base = {
+      url = "https://repo.maven.apache.org/maven2/org/openjfx/javafx-base/25/javafx-base-25-linux.jar";
+      flake = false;
+    };
+
+    javafx-controls = {
+      url = "https://repo.maven.apache.org/maven2/org/openjfx/javafx-controls/25/javafx-controls-25-linux.jar";
+      flake = false;
+    };
+
+    javafx-graphics = {
+      url = "https://repo.maven.apache.org/maven2/org/openjfx/javafx-graphics/25/javafx-graphics-25-linux.jar";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, jlibghostty, jtoml-all }:
+  outputs = {
+    self,
+    nixpkgs,
+    jlibghostty,
+    jtoml-all,
+    javafx-base,
+    javafx-controls,
+    javafx-graphics
+  }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
@@ -37,12 +60,7 @@
           mkdir -p build/classes build/native-image
 
           find src/main/java -name '*.java' | sort > build/sources.txt
-          javafx_module_path="${openjfx}/jmods"
-          if [ ! -f "$javafx_module_path/javafx.graphics.jmod" ]; then
-            echo "Could not find javafx.graphics.jmod under $javafx_module_path" >&2
-            find ${openjfx} -maxdepth 4 -type f | sort >&2
-            exit 1
-          fi
+          javafx_module_path="${javafx-base}:${javafx-controls}:${javafx-graphics}"
 
           jlib_classpath="$(
             find ${jlib}/maven -type f -name '*.jar' \
@@ -51,7 +69,7 @@
               | sort \
               | paste -sd: -
           )"
-          app_classpath="build/classes:${jtoml-all}:$jlib_classpath"
+          app_classpath="build/classes:${jtoml-all}:$jlib_classpath:${javafx-base}:${javafx-controls}:${javafx-graphics}"
 
           javac \
             --release 25 \

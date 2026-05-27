@@ -48,8 +48,8 @@
         "${openjfx}/modules_libs/javafx.graphics"
         "${openjfx}/modules_libs/javafx.media"
       ];
-      x11 = name: oldName:
-        if pkgs ? ${name} then pkgs.${name} else pkgs.xorg.${oldName};
+      x11 = name: oldName: pkgs.${name} or pkgs.xorg.${oldName};
+      mesaDrivers = pkgs.mesa.drivers or pkgs.mesa;
       runtimeLibraryPath = pkgs.lib.makeLibraryPath ([
         openjfx
         jlib
@@ -64,6 +64,7 @@
         pkgs.libxkbcommon
         pkgs.zlib
         pkgs.stdenv.cc.cc.lib
+        pkgs.libglvnd
         (x11 "libx11" "libX11")
         (x11 "libxext" "libXext")
         (x11 "libxrender" "libXrender")
@@ -78,6 +79,16 @@
       ++ pkgs.lib.optionals (pkgs ? libxxf86vm || pkgs.xorg ? libXxf86vm) [ (x11 "libxxf86vm" "libXxf86vm") ]
       ++ pkgs.lib.optionals (pkgs ? libGL) [ pkgs.libGL ]
       ++ pkgs.lib.optionals (pkgs ? mesa) [ pkgs.mesa ]);
+      openglDriverPath = pkgs.lib.concatStringsSep ":" [
+        "/run/opengl-driver/lib"
+        "/run/opengl-driver-32/lib"
+        "${mesaDrivers}/lib"
+      ];
+      driDriverPath = pkgs.lib.concatStringsSep ":" [
+        "/run/opengl-driver/lib/dri"
+        "/run/opengl-driver-32/lib/dri"
+        "${mesaDrivers}/lib/dri"
+      ];
     in {
       packages.${system}.default = pkgs.stdenvNoCC.mkDerivation {
         pname = "jprototerm";
@@ -143,11 +154,12 @@
 
           wrapProgram $out/bin/jprototerm \
             --set GDK_BACKEND x11 \
+            --set LIBGL_DRIVERS_PATH ${driDriverPath} \
             --set JAVA_TOOL_OPTIONS "-Dprism.order=es2,sw -Dprism.verbose=true" \
             --add-flags "-Djava.library.path=${javafxNativeLibraryPath}" \
             --add-flags "-Dprism.order=es2,sw" \
             --add-flags "-Dprism.verbose=true" \
-            --prefix LD_LIBRARY_PATH : ${javafxNativeLibraryPath}:${runtimeLibraryPath} \
+            --prefix LD_LIBRARY_PATH : ${javafxNativeLibraryPath}:${runtimeLibraryPath}:${openglDriverPath} \
             --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.util-linux pkgs.bash ]}
 
           runHook postInstall

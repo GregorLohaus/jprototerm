@@ -1,0 +1,27 @@
+[
+  { "name": "java.nio.Buffer" },
+  { "name": "java.nio.ByteBuffer" },
+  { "name": "java.nio.DirectByteBuffer" },
+  { "name": "java.nio.IntBuffer" },
+  { "name": "java.nio.FloatBuffer" },
+  { "name": "java.nio.LongBuffer" },
+  { "name": "java.nio.ShortBuffer" },
+  {
+    "name": "com.sun.glass.ui.gtk.GtkApplication",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.sun.glass.ui.gtk.GtkWindow",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.sun.glass.ui.gtk.GtkView",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  }
+]

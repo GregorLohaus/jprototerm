@@ -8,6 +8,8 @@ JavaFX canvas terminal prototype using `jlibghostty` for terminal emulation, Nix
 nix build
 ```
 
+The package build compiles with Nix-provided OpenJFX 25, `jlibghostty`, JToml, and GraalVM Native Image directly so it does not depend on Gradle plugin resolution inside the Nix sandbox.
+
 For development:
 
 ```sh
@@ -16,7 +18,7 @@ gradle -PjlibghosttyMavenRepo="$JLIBGHOSTTY_MAVEN_REPO" run
 gradle -PjlibghosttyMavenRepo="$JLIBGHOSTTY_MAVEN_REPO" nativeCompile
 ```
 
-The current flake follows the normal Gradle dependency-resolution shape. For a fully pure Nix build, vendor the Gradle dependency graph with `gradle2nix` or a checked-in Maven repository.
+The Gradle project is kept for interactive development and IDE import.
 
 ## Config
 

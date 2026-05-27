@@ -4,9 +4,14 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     jlibghostty.url = "git+https://gitea.gregorlohaus.com/gregor/jlibghostty.git";
+
+    jtoml-all = {
+      url = "https://repo.maven.apache.org/maven2/io/github/wasabithumb/jtoml-all/1.5.2/jtoml-all-1.5.2.jar";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, jlibghostty }:
+  outputs = { self, nixpkgs, jlibghostty, jtoml-all }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
@@ -14,48 +19,7 @@
       jlib = jlibghostty.packages.${system}.jlibghostty;
       graalvm = pkgs.graalvmPackages.graalvm-ce;
       gradle = if pkgs ? gradle_9 then pkgs.gradle_9 else pkgs.gradle;
-      gradleDeps = pkgs.stdenvNoCC.mkDerivation {
-        pname = "jprototerm-gradle-deps";
-        version = "0.1.0";
-        src = ./.;
-
-        nativeBuildInputs = [
-          graalvm
-          gradle
-        ];
-
-        outputHashAlgo = "sha256";
-        outputHashMode = "recursive";
-        outputHash = pkgs.lib.fakeHash;
-
-        buildPhase = ''
-          runHook preBuild
-
-          export HOME=$TMPDIR/home
-          export GRADLE_USER_HOME=$out
-          mkdir -p "$HOME" "$GRADLE_USER_HOME"
-
-          gradle \
-            --no-daemon \
-            --stacktrace \
-            -PjlibghosttyMavenRepo=${jlib}/maven \
-            help
-
-          gradle \
-            --no-daemon \
-            --stacktrace \
-            -PjlibghosttyMavenRepo=${jlib}/maven \
-            dependencies \
-            --configuration runtimeClasspath
-
-          runHook postBuild
-        '';
-
-        installPhase = ''
-          runHook preInstall
-          runHook postInstall
-        '';
-      };
+      openjfx = pkgs.javaPackages.openjfx25;
     in {
       packages.${system}.default = pkgs.stdenvNoCC.mkDerivation {
         pname = "jprototerm";
@@ -64,25 +28,45 @@
 
         nativeBuildInputs = [
           graalvm
-          gradle
           pkgs.makeWrapper
         ];
 
         buildPhase = ''
           runHook preBuild
 
-          export HOME=$TMPDIR/home
-          export GRADLE_USER_HOME=$TMPDIR/gradle
-          mkdir -p "$HOME" "$GRADLE_USER_HOME"
-          cp -R ${gradleDeps}/. "$GRADLE_USER_HOME"
-          chmod -R u+w "$GRADLE_USER_HOME"
+          mkdir -p build/classes build/native-image
 
-          gradle \
-            --no-daemon \
-            --offline \
-            --stacktrace \
-            -PjlibghosttyMavenRepo=${jlib}/maven \
-            nativeCompile
+          find src/main/java -name '*.java' | sort > build/sources.txt
+          jlib_classpath="$(
+            find ${jlib}/maven -type f -name '*.jar' \
+              ! -name '*-sources.jar' \
+              ! -name '*-javadoc.jar' \
+              | sort \
+              | paste -sd: -
+          )"
+          app_classpath="build/classes:${jtoml-all}:$jlib_classpath"
+
+          javac \
+            --release 25 \
+            --module-path ${openjfx}/lib \
+            --add-modules javafx.controls,javafx.graphics \
+            -cp "${jtoml-all}:$jlib_classpath" \
+            -d build/classes \
+            @build/sources.txt
+
+          if [ -d src/main/resources ]; then
+            cp -R src/main/resources/. build/classes/
+          fi
+
+          native-image \
+            --no-fallback \
+            --enable-url-protocols=file \
+            --module-path ${openjfx}/lib \
+            --add-modules javafx.controls,javafx.graphics \
+            -cp "$app_classpath" \
+            -H:Name=jprototerm \
+            -H:Class=com.gregor.jprototerm.Main \
+            -H:Path=build/native-image
 
           runHook postBuild
         '';
@@ -91,10 +75,11 @@
           runHook preInstall
 
           mkdir -p $out/bin
-          cp build/gluonfx/*/*/jprototerm $out/bin/jprototerm
+          cp build/native-image/jprototerm $out/bin/jprototerm
 
           wrapProgram $out/bin/jprototerm \
             --set GDK_BACKEND x11 \
+            --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ openjfx jlib ]} \
             --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.util-linux pkgs.bash ]}
 
           runHook postInstall

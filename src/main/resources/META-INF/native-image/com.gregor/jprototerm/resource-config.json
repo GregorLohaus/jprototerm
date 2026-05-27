@@ -1,6 +1,0 @@
-{
-  "resources": [
-    { "pattern": ".*\\.css$" },
-    { "pattern": ".*\\.toml$" }
-  ]
-}

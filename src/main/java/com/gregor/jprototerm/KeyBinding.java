@@ -18,7 +18,7 @@ public record KeyBinding(boolean alt, boolean control, boolean shift, KeyCode co
                 case "ALT", "META" -> alt = true;
                 case "CTRL", "CONTROL" -> control = true;
                 case "SHIFT" -> shift = true;
-                default -> code = KeyCode.getKeyCode(token);
+                default -> code = keyCode(token);
             }
         }
 
@@ -33,5 +33,20 @@ public record KeyBinding(boolean alt, boolean control, boolean shift, KeyCode co
                 && event.isControlDown() == control
                 && event.isShiftDown() == shift
                 && event.getCode() == code;
+    }
+
+    private static KeyCode keyCode(String token) {
+        KeyCode alias = switch (token) {
+            case "GRAVE", "BACKTICK", "BACK_QUOTE", "`" -> KeyCode.BACK_QUOTE;
+            default -> null;
+        };
+        if (alias != null) {
+            return alias;
+        }
+        try {
+            return KeyCode.valueOf(token);
+        } catch (IllegalArgumentException ex) {
+            return KeyCode.getKeyCode(token);
+        }
     }
 }

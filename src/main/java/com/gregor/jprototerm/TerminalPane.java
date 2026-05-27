@@ -1,30 +1,38 @@
 package com.gregor.jprototerm;
 
 import dev.jlibghostty.Ghostty;
+import dev.jlibghostty.KittyGraphics;
+import dev.jlibghostty.RenderStateSnapshot;
 import dev.jlibghostty.Terminal;
 import dev.jlibghostty.TerminalOptions;
 
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class TerminalPane implements AutoCloseable {
     private final Terminal terminal;
-    private final KittyGraphicsRegistry graphicsRegistry;
-    private final AtomicReference<String> snapshotText = new AtomicReference<>("");
+    private final AtomicReference<RenderStateSnapshot> renderSnapshot = new AtomicReference<>();
     private ShellSession session;
     private boolean floating;
+    private boolean visible = true;
     private double x;
     private double y;
     private double width;
     private double height;
+    private int columns;
+    private int rows;
+    private int pixelWidth;
+    private int pixelHeight;
 
-    private TerminalPane(Terminal terminal, KittyGraphicsRegistry graphicsRegistry) {
+    private TerminalPane(Terminal terminal, int columns, int rows) {
         this.terminal = terminal;
-        this.graphicsRegistry = graphicsRegistry;
+        this.columns = columns;
+        this.rows = rows;
     }
 
-    public static TerminalPane create(int columns, int rows, boolean kittyGraphics) {
+    public static TerminalPane create(int columns, int rows) {
         Terminal terminal = Ghostty.open(TerminalOptions.of(columns, rows));
-        TerminalPane pane = new TerminalPane(terminal, new KittyGraphicsRegistry(kittyGraphics));
+        TerminalPane pane = new TerminalPane(terminal, columns, rows);
         pane.refresh();
         return pane;
     }
@@ -32,6 +40,13 @@ public final class TerminalPane implements AutoCloseable {
     public void write(String text) {
         synchronized (terminal) {
             terminal.write(text);
+            refresh();
+        }
+    }
+
+    public void write(byte[] bytes) {
+        synchronized (terminal) {
+            terminal.write(bytes);
             refresh();
         }
     }
@@ -46,12 +61,14 @@ public final class TerminalPane implements AutoCloseable {
         }
     }
 
-    public String snapshotText() {
-        return snapshotText.get();
+    public RenderStateSnapshot renderSnapshot() {
+        return renderSnapshot.get();
     }
 
-    public KittyGraphicsRegistry graphicsRegistry() {
-        return graphicsRegistry;
+    public Optional<KittyGraphics> kittyGraphics() {
+        synchronized (terminal) {
+            return terminal.kittyGraphics();
+        }
     }
 
     public boolean floating() {
@@ -60,6 +77,14 @@ public final class TerminalPane implements AutoCloseable {
 
     public void setFloating(boolean floating) {
         this.floating = floating;
+    }
+
+    public boolean visible() {
+        return visible;
+    }
+
+    public void setVisible(boolean visible) {
+        this.visible = visible;
     }
 
     public double x() {
@@ -85,8 +110,29 @@ public final class TerminalPane implements AutoCloseable {
         this.height = height;
     }
 
+    public void resize(int columns, int rows, int pixelWidth, int pixelHeight) {
+        if (columns <= 0 || rows <= 0 || pixelWidth <= 0 || pixelHeight <= 0) {
+            return;
+        }
+        if (this.columns == columns && this.rows == rows && this.pixelWidth == pixelWidth && this.pixelHeight == pixelHeight) {
+            return;
+        }
+
+        synchronized (terminal) {
+            terminal.resize(columns, rows, pixelWidth, pixelHeight);
+            if (session != null) {
+                session.resize(columns, rows);
+            }
+            this.columns = columns;
+            this.rows = rows;
+            this.pixelWidth = pixelWidth;
+            this.pixelHeight = pixelHeight;
+            refresh();
+        }
+    }
+
     private void refresh() {
-        snapshotText.set(String.valueOf(terminal.snapshot()));
+        renderSnapshot.set(terminal.renderSnapshot());
     }
 
     @Override

@@ -20,6 +20,7 @@ public final class Main extends Application {
         StackPane root = new StackPane(terminalView.canvas());
         terminalView.canvas().widthProperty().bind(root.widthProperty());
         terminalView.canvas().heightProperty().bind(root.heightProperty());
+        terminalView.canvas().setOnMousePressed(event -> terminalView.canvas().requestFocus());
 
         Scene scene = new Scene(root, config.windowWidth(), config.windowHeight());
         scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> handlePressed(config, event));
@@ -38,6 +39,7 @@ public final class Main extends Application {
             workspace.close();
         });
         stage.show();
+        terminalView.canvas().requestFocus();
     }
 
     private void handlePressed(AppConfig config, KeyEvent event) {
@@ -55,6 +57,15 @@ public final class Main extends Application {
             event.consume();
         } else if (config.keybindings().get("toggle_floating").matches(event)) {
             workspace.toggleFloating();
+            event.consume();
+        } else if (config.keybindings().get("new_floating").matches(event)) {
+            workspace.createFloatingPane();
+            event.consume();
+        } else if (config.keybindings().get("next_floating").matches(event)) {
+            workspace.nextFloatingPane();
+            event.consume();
+        } else if (config.keybindings().get("close_pane").matches(event)) {
+            workspace.closeActivePane();
             event.consume();
         } else {
             String encoded = KeyEncoder.encode(event);
@@ -78,8 +89,7 @@ public final class Main extends Application {
     }
 
     public static void main(String[] args) {
-        System.setProperty("prism.order", "es2,sw");
-        System.setProperty("prism.verbose", "true");
+        System.setProperty("prism.order", System.getProperty("prism.order", "es2,sw"));
         launch(Main.class, args);
     }
 }

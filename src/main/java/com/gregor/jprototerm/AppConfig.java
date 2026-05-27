@@ -45,7 +45,10 @@ public record AppConfig(
                             "navigate_down", binding(document, "keybindings.navigate_down", defaults.keybindings.get("navigate_down")),
                             "navigate_up", binding(document, "keybindings.navigate_up", defaults.keybindings.get("navigate_up")),
                             "navigate_right", binding(document, "keybindings.navigate_right", defaults.keybindings.get("navigate_right")),
-                            "toggle_floating", binding(document, "keybindings.toggle_floating", defaults.keybindings.get("toggle_floating"))
+                            "toggle_floating", binding(document, "keybindings.toggle_floating", defaults.keybindings.get("toggle_floating")),
+                            "new_floating", binding(document, "keybindings.new_floating", defaults.keybindings.get("new_floating")),
+                            "next_floating", binding(document, "keybindings.next_floating", defaults.keybindings.get("next_floating")),
+                            "close_pane", binding(document, "keybindings.close_pane", defaults.keybindings.get("close_pane"))
                     )
             );
         } catch (TomlException ex) {
@@ -59,7 +62,7 @@ public record AppConfig(
                 100,
                 30,
                 defaultShell(),
-                "Symbols Nerd Font Mono",
+                "JetBrainsMono Nerd Font",
                 15.0,
                 1200.0,
                 760.0,
@@ -69,7 +72,10 @@ public record AppConfig(
                         "navigate_down", KeyBinding.parse("ALT+J"),
                         "navigate_up", KeyBinding.parse("ALT+K"),
                         "navigate_right", KeyBinding.parse("ALT+L"),
-                        "toggle_floating", KeyBinding.parse("ALT+F")
+                        "toggle_floating", KeyBinding.parse("ALT+F"),
+                        "new_floating", KeyBinding.parse("ALT+SHIFT+F"),
+                        "next_floating", KeyBinding.parse("ALT+F12"),
+                        "close_pane", KeyBinding.parse("ALT+X")
                 )
         );
     }
@@ -83,8 +89,7 @@ public record AppConfig(
     }
 
     private static String defaultShell() {
-        String shell = System.getenv("SHELL");
-        return shell == null || shell.isBlank() ? "/bin/sh" : shell;
+        return "/bin/bash";
     }
 
     private static KeyBinding binding(TomlTable table, String key, KeyBinding fallback) {

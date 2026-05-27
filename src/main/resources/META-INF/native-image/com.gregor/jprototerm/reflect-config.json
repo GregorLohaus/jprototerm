@@ -25,6 +25,11 @@
     "allPublicConstructors": true
   },
   {
+    "name": "com.sun.prism.es2.X11GLFactory",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true
+  },
+  {
     "name": "com.sun.prism.sw.SWPipeline",
     "allDeclaredConstructors": true,
     "allPublicConstructors": true

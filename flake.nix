@@ -89,6 +89,7 @@
 
           native-image \
             --no-fallback \
+            --enable-native-access=javafx.graphics \
             --module-path "$javafx_module_path" \
             --add-modules javafx.controls,javafx.graphics \
             -cp "$app_classpath" \

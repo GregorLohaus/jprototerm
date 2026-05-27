@@ -89,7 +89,6 @@
 
           native-image \
             --no-fallback \
-            --enable-url-protocols=file \
             --module-path "$javafx_module_path" \
             --add-modules javafx.controls,javafx.graphics \
             -cp "$app_classpath" \

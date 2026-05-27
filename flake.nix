@@ -107,6 +107,7 @@
 
           wrapProgram $out/bin/jprototerm \
             --set GDK_BACKEND x11 \
+            --set JAVA_TOOL_OPTIONS "-Dprism.order=sw" \
             --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ openjfx jlib ]}:${openjfx}/modules_libs/javafx.graphics \
             --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.util-linux pkgs.bash ]}
 

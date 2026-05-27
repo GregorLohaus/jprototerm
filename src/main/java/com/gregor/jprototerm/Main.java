@@ -78,6 +78,8 @@ public final class Main extends Application {
     }
 
     public static void main(String[] args) {
+        System.setProperty("prism.order", "sw");
+        System.setProperty("prism.verbose", "true");
         launch(Main.class, args);
     }
 }

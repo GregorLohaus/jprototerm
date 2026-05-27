@@ -49,7 +49,7 @@
         "${openjfx}/modules_libs/javafx.media"
       ];
       x11 = name: oldName: pkgs.${name} or pkgs.xorg.${oldName};
-      mesaDrivers = pkgs.mesa.drivers or pkgs.mesa;
+      mesaDrivers = pkgs.mesa;
       runtimeLibraryPath = pkgs.lib.makeLibraryPath ([
         openjfx
         jlib

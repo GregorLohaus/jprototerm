@@ -22,16 +22,19 @@
   {
     "name": "com.sun.prism.es2.ES2Pipeline",
     "allDeclaredConstructors": true,
-    "allPublicConstructors": true
+    "allPublicConstructors": true,
+    "allPublicMethods": true
   },
   {
     "name": "com.sun.prism.es2.X11GLFactory",
     "allDeclaredConstructors": true,
-    "allPublicConstructors": true
+    "allPublicConstructors": true,
+    "allPublicMethods": true
   },
   {
     "name": "com.sun.prism.sw.SWPipeline",
     "allDeclaredConstructors": true,
-    "allPublicConstructors": true
+    "allPublicConstructors": true,
+    "allPublicMethods": true
   }
 ]

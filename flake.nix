@@ -109,7 +109,7 @@
               useBwrap = false;
             };
 
-            gradleBuildTask = "nativeExecutable";
+            gradleBuildTask = "nativeBuild";
             gradleUpdateTask = "nixDownloadDeps";
             gradleFlags = [
               "--no-build-cache"

@@ -4,9 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     jlibghostty.url = "git+https://gitea.gregorlohaus.com/gregor/jlibghostty.git";
+    ghostty.follows = "jlibghostty/ghostty";
   };
 
-  outputs = { self, nixpkgs, jlibghostty }:
+  outputs = { self, nixpkgs, jlibghostty, ghostty }:
     let
       supportedSystems = [ "x86_64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
@@ -16,6 +17,7 @@
           pkgs = import nixpkgs { inherit system; };
 
           jlib = jlibghostty.packages.${system}.jlibghostty;
+          ghosttyVt = ghostty.packages.${system}.libghostty-vt;
 
           javafxStaticSdkZip = pkgs.fetchurl {
             url = "https://download2.gluonhq.com/substrate/javafxstaticsdk/openjfx-21-ea+11.3-linux-x86_64-static.zip";
@@ -126,6 +128,7 @@
             pkgs.libxxf86vm
             pkgs.zlib
             pkgs.zlib.dev
+            ghosttyVt
           ];
           jprototerm = pkgs.stdenv.mkDerivation (finalAttrs: {
             pname = "jprototerm";
@@ -228,6 +231,7 @@
               wrapProgram "$out/bin/jprototerm" \
                 --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}" \
                 --run 'glShimDir="''${XDG_RUNTIME_DIR:-/tmp}/jprototerm-gl"; mkdir -p "$glShimDir"; for lib in /lib/x86_64-linux-gnu/libGL.so.1 /lib/x86_64-linux-gnu/libGLX.so.0 /lib/x86_64-linux-gnu/libGLdispatch.so.0 /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so* /usr/lib/x86_64-linux-gnu/libEGL_nvidia.so* /usr/lib/x86_64-linux-gnu/libnvidia*.so* /usr/lib/x86_64-linux-gnu/nvidia/current/lib*.so*; do [ -e "$lib" ] && ln -sfn "$lib" "$glShimDir/$(basename "$lib")"; done; export LD_LIBRARY_PATH="$glShimDir''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; export __GLX_VENDOR_LIBRARY_NAME="''${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"; if [ -e /usr/share/glvnd/egl_vendor.d/10_nvidia.json ]; then export __EGL_VENDOR_LIBRARY_FILENAMES="''${__EGL_VENDOR_LIBRARY_FILENAMES:-/usr/share/glvnd/egl_vendor.d/10_nvidia.json}"; fi' \
+                --set JLIBGHOSTTY_LIBRARY "${ghosttyVt}/lib/libghostty-vt.so" \
                 --set GDK_BACKEND x11
 
               runHook postInstall
@@ -249,6 +253,7 @@
         let
           pkgs = import nixpkgs { inherit system; };
           jlib = jlibghostty.packages.${system}.jlibghostty;
+          ghosttyVt = ghostty.packages.${system}.libghostty-vt;
           runtimeLibs = [
             pkgs.glib
             pkgs.gtk3
@@ -271,6 +276,7 @@
             pkgs.libxxf86vm
             pkgs.zlib
             pkgs.zlib.dev
+            ghosttyVt
           ];
         in {
           default = pkgs.mkShell {
@@ -281,6 +287,7 @@
             ] ++ runtimeLibs;
 
             JLIBGHOSTTY_MAVEN_REPO = "${jlib}/maven";
+            JLIBGHOSTTY_LIBRARY = "${ghosttyVt}/lib/libghostty-vt.so";
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;
           };
         });

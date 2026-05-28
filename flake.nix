@@ -155,6 +155,7 @@
               ''
                 mkdir -p "$out"
                 cp -a ${finalAttrs.baseMitmCache}/. "$out/"
+                chmod -R u+w "$out"
 
                 substratePath="$out/https/plugins.gradle.org/m2/com/gluonhq/substrate/0.0.68/substrate-0.0.68.jar"
                 if [ ! -e "$substratePath" ]; then

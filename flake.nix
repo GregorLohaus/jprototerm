@@ -113,6 +113,7 @@
             pkgs.ffmpeg.dev
             pkgs.ffmpeg.lib
             pkgs.freetype
+            pkgs.fontconfig
             pkgs.libx11
             pkgs.libx11.dev
             pkgs.libxext
@@ -224,8 +225,8 @@
 
               cp "$binary" "$out/bin/jprototerm"
               wrapProgram "$out/bin/jprototerm" \
-                --run 'if [ -d /usr/lib/x86_64-linux-gnu/nvidia/current ]; then export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/nvidia/current''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; export __GLX_VENDOR_LIBRARY_NAME="''${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"; fi' \
-                --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}" \
+                --run 'if [ -d /usr/lib/x86_64-linux-gnu/nvidia/current ]; then export __GLX_VENDOR_LIBRARY_NAME="''${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"; fi' \
+                --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}:/usr/lib/x86_64-linux-gnu/nvidia/current" \
                 --set GDK_BACKEND x11
 
               runHook postInstall
@@ -249,6 +250,7 @@
             pkgs.ffmpeg.dev
             pkgs.ffmpeg.lib
             pkgs.freetype
+            pkgs.fontconfig
             pkgs.libx11
             pkgs.libx11.dev
             pkgs.libxext

@@ -215,9 +215,9 @@
               runHook preInstall
 
               mkdir -p "$out/bin"
-              binary="$(find build/gluonfx -type f -perm -0100 -name jprototerm | head -n1)"
+              binary="$(find build/gluonfx -path '*/gvm/*' -prune -o -type f -perm -0100 -print | head -n1)"
               if [ -z "$binary" ]; then
-                echo "Could not find native jprototerm binary under build/gluonfx" >&2
+                echo "Could not find native executable under build/gluonfx" >&2
                 find build/gluonfx -type f -perm -0100 >&2 || true
                 exit 1
               fi

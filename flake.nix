@@ -129,16 +129,22 @@
 
             preConfigure = ''
               export HOME="$TMPDIR/home"
-              mkdir -p "$HOME/.gluon/substrate"
-              cp -f ${javafxStaticSdkZip} "$HOME/.gluon/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
-              chmod u+w "$HOME/.gluon/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+              export GRADLE_OPTS="-Duser.home=$HOME ''${GRADLE_OPTS:-}"
+              for gluonHome in "$HOME/.gluon" /build/.gluon; do
+                mkdir -p "$gluonHome/substrate"
+                cp -f ${javafxStaticSdkZip} "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+                chmod u+w "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+              done
             '';
 
             preBuild = ''
               export HOME="$TMPDIR/home"
-              mkdir -p "$HOME/.gluon/substrate"
-              cp -f ${javafxStaticSdkZip} "$HOME/.gluon/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
-              chmod u+w "$HOME/.gluon/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+              export GRADLE_OPTS="-Duser.home=$HOME ''${GRADLE_OPTS:-}"
+              for gluonHome in "$HOME/.gluon" /build/.gluon; do
+                mkdir -p "$gluonHome/substrate"
+                cp -f ${javafxStaticSdkZip} "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+                chmod u+w "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+              done
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath runtimeLibs}:$LD_LIBRARY_PATH"
             '';
 

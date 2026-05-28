@@ -88,8 +88,7 @@
             pkgs.zlib
             pkgs.zlib.dev
           ];
-        in {
-          default = pkgs.stdenv.mkDerivation {
+          jprototerm = pkgs.stdenv.mkDerivation (finalAttrs: {
             pname = "jprototerm";
             version = "0.1.0";
             src = ./.;
@@ -103,19 +102,32 @@
 
             buildInputs = runtimeLibs;
 
-            buildPhase = ''
-              runHook preBuild
+            mitmCache = pkgs.gradle_9.fetchDeps {
+              pkg = finalAttrs.finalPackage;
+              data = ./deps.json;
+              silent = false;
+              useBwrap = false;
+            };
 
+            gradleBuildTask = "nativeExecutable";
+            gradleUpdateTask = "nixDownloadDeps";
+            gradleFlags = [
+              "--no-build-cache"
+              "-Dorg.gradle.java.home=${gluonGraalvm}"
+            ];
+
+            GRAALVM_HOME = "${gluonGraalvm}";
+            JAVA_HOME = "${gluonGraalvm}";
+            JLIBGHOSTTY_MAVEN_REPO = "${jlib}/maven";
+
+            preBuild = ''
               export HOME="$TMPDIR/home"
-              export GRADLE_USER_HOME="$TMPDIR/gradle"
-              export GRAALVM_HOME="${gluonGraalvm}"
-              export JAVA_HOME="${gluonGraalvm}"
-              export JLIBGHOSTTY_MAVEN_REPO="${jlib}/maven"
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath runtimeLibs}:$LD_LIBRARY_PATH"
+            '';
 
-              gradle --no-daemon --no-build-cache nativeExecutable
-
-              runHook postBuild
+            preGradleUpdate = ''
+              export HOME="$TMPDIR/home"
+              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath runtimeLibs}:$LD_LIBRARY_PATH"
             '';
 
             installPhase = ''
@@ -136,7 +148,10 @@
 
               runHook postInstall
             '';
-          };
+          });
+        in {
+          default = jprototerm;
+          gradleDepsUpdateScript = jprototerm.mitmCache.updateScript;
         });
 
       devShells = forAllSystems (system:

@@ -44,8 +44,13 @@
                 # Gluon Substrate hardcodes /usr/bin/pkg-config. Keep the
                 # replacement string the same byte length to avoid rewriting
                 # the Java class constant pool structure.
-                substituteInPlace com/gluonhq/substrate/util/linux/LinuxLinkerFlags.class \
-                  --replace-fail "/usr/bin/pkg-config" "/tmp/nix/pkg-config"
+                perl -0pi -e 's|/usr/bin/pkg-config|/tmp/nix/pkg-config|g' \
+                  com/gluonhq/substrate/util/linux/LinuxLinkerFlags.class
+
+                if grep -a -q "/usr/bin/pkg-config" com/gluonhq/substrate/util/linux/LinuxLinkerFlags.class; then
+                  echo "Failed to patch hardcoded pkg-config path in Substrate" >&2
+                  exit 1
+                fi
 
                 zip -qr "$out" .
               '';

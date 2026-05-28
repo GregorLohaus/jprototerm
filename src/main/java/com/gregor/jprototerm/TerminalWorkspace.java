@@ -9,6 +9,7 @@ public final class TerminalWorkspace implements AutoCloseable {
     private final List<TerminalPane> panes = new ArrayList<>();
     private int activeIndex;
     private int hiddenFloatingFocusIndex = -1;
+    private long version;
 
     public TerminalWorkspace(AppConfig config) {
         this.config = config;
@@ -38,10 +39,15 @@ public final class TerminalWorkspace implements AutoCloseable {
         return activePane() == pane;
     }
 
+    public long version() {
+        return version;
+    }
+
     public void focus(TerminalPane pane) {
         int index = panes.indexOf(pane);
-        if (index >= 0 && pane.visible()) {
+        if (index >= 0 && pane.visible() && activeIndex != index) {
             activeIndex = index;
+            version++;
         }
     }
 
@@ -79,6 +85,7 @@ public final class TerminalWorkspace implements AutoCloseable {
     public void navigate(Direction direction) {
         TerminalPane current = activePane();
         if (current.floating() && navigateFloatingStack(direction)) {
+            version++;
             return;
         }
 
@@ -87,7 +94,10 @@ public final class TerminalWorkspace implements AutoCloseable {
                 .filter(pane -> pane != current)
                 .filter(pane -> directionFilter(direction, current, pane))
                 .min(Comparator.comparingDouble(pane -> distance(current, pane)))
-                .ifPresent(pane -> activeIndex = panes.indexOf(pane));
+                .ifPresent(pane -> {
+                    activeIndex = panes.indexOf(pane);
+                    version++;
+                });
     }
 
     public void toggleFloating() {
@@ -105,10 +115,12 @@ public final class TerminalWorkspace implements AutoCloseable {
             hiddenFloatingFocusIndex = active.floating() ? activeIndex : firstVisibleFloatingIndex();
             floating.forEach(pane -> pane.setVisible(false));
             activeIndex = firstVisibleNonFloatingIndex();
+            version++;
         } else {
             floating.forEach(pane -> pane.setVisible(true));
             activeIndex = visibleIndexOrFallback(hiddenFloatingFocusIndex, panes.indexOf(floating.get(floating.size() - 1)));
             hiddenFloatingFocusIndex = -1;
+            version++;
         }
     }
 
@@ -116,12 +128,14 @@ public final class TerminalWorkspace implements AutoCloseable {
         TerminalPane pane = openPane(true);
         panes.add(pane);
         activeIndex = panes.size() - 1;
+        version++;
     }
 
     public void nextFloatingPane() {
         TerminalPane next = nextFloatingAfter(activeIndex);
         next.setVisible(true);
         activeIndex = panes.indexOf(next);
+        version++;
     }
 
     public void closeActivePane() {
@@ -136,6 +150,7 @@ public final class TerminalWorkspace implements AutoCloseable {
         active.close();
         activeIndex = adjustIndexAfterRemoval(previous, removed);
         hiddenFloatingFocusIndex = adjustHiddenFocusAfterRemoval(hiddenFloatingFocusIndex, removed);
+        version++;
     }
 
     private TerminalPane nextFloatingAfter(int index) {

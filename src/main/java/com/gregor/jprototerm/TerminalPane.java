@@ -30,6 +30,7 @@ public final class TerminalPane implements AutoCloseable {
     private int rows;
     private int pixelWidth;
     private int pixelHeight;
+    private long renderVersion;
 
     private TerminalPane(Terminal terminal, int columns, int rows) {
         this.terminal = terminal;
@@ -114,6 +115,10 @@ public final class TerminalPane implements AutoCloseable {
         return renderSnapshot.get();
     }
 
+    public long renderVersion() {
+        return renderVersion;
+    }
+
     public Optional<KittyGraphics> kittyGraphics() {
         synchronized (terminal) {
             return terminal.kittyGraphics();
@@ -182,6 +187,7 @@ public final class TerminalPane implements AutoCloseable {
 
     private void refresh() {
         renderSnapshot.set(terminal.renderSnapshot());
+        renderVersion++;
     }
 
     @Override

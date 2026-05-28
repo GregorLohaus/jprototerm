@@ -224,14 +224,6 @@
               fi
 
               cp "$binary" "$out/bin/jprototerm"
-              currentRpath="$(patchelf --print-rpath "$out/bin/jprototerm" || true)"
-              filteredRpath="$(printf '%s' "$currentRpath" | tr ':' '\n' | grep -v 'libglvnd' | paste -sd: -)"
-              if [ -n "$filteredRpath" ]; then
-                filteredRpath="$filteredRpath:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/nvidia/current"
-              else
-                filteredRpath="/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/nvidia/current"
-              fi
-              patchelf --set-rpath "$filteredRpath" "$out/bin/jprototerm"
 
               wrapProgram "$out/bin/jprototerm" \
                 --run 'if [ -d /usr/lib/x86_64-linux-gnu/nvidia/current ]; then export __GLX_VENDOR_LIBRARY_NAME="''${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"; fi' \
@@ -239,6 +231,18 @@
                 --set GDK_BACKEND x11
 
               runHook postInstall
+            '';
+
+            postFixup = ''
+              binary="$out/bin/.jprototerm-wrapped"
+              currentRpath="$(patchelf --print-rpath "$binary" || true)"
+              filteredRpath="$(printf '%s' "$currentRpath" | tr ':' '\n' | grep -v 'libglvnd' | paste -sd: -)"
+              if [ -n "$filteredRpath" ]; then
+                filteredRpath="$filteredRpath:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/nvidia/current"
+              else
+                filteredRpath="/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/nvidia/current"
+              fi
+              patchelf --set-rpath "$filteredRpath" "$binary"
             '';
           });
         in {

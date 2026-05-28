@@ -32,6 +32,7 @@
             pkgs.runCommand "substrate-0.0.68-patched.jar"
               {
                 nativeBuildInputs = [
+                  pkgs.perl
                   pkgs.unzip
                   pkgs.zip
                 ];

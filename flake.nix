@@ -226,9 +226,8 @@
               cp "$binary" "$out/bin/jprototerm"
 
               wrapProgram "$out/bin/jprototerm" \
-                --run 'if [ -d /usr/lib/x86_64-linux-gnu/nvidia/current ]; then export __GLX_VENDOR_LIBRARY_NAME="''${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"; fi' \
+                --run 'glShimDir="''${XDG_RUNTIME_DIR:-/tmp}/jprototerm-gl"; mkdir -p "$glShimDir"; for lib in /lib/x86_64-linux-gnu/libGL.so.1 /lib/x86_64-linux-gnu/libGLX.so.0 /lib/x86_64-linux-gnu/libGLdispatch.so.0 /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.0 /usr/lib/x86_64-linux-gnu/nvidia/current/lib*.so*; do [ -e "$lib" ] && ln -sfn "$lib" "$glShimDir/$(basename "$lib")"; done; export LD_LIBRARY_PATH="$glShimDir''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; export __GLX_VENDOR_LIBRARY_NAME="''${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"' \
                 --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}" \
-                --suffix LD_LIBRARY_PATH : "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/nvidia/current" \
                 --set GDK_BACKEND x11
 
               runHook postInstall
@@ -238,11 +237,6 @@
               binary="$out/bin/.jprototerm-wrapped"
               currentRpath="$(patchelf --print-rpath "$binary" || true)"
               filteredRpath="$(printf '%s' "$currentRpath" | tr ':' '\n' | grep -v 'libglvnd' | paste -sd: -)"
-              if [ -n "$filteredRpath" ]; then
-                filteredRpath="$filteredRpath:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/nvidia/current"
-              else
-                filteredRpath="/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/nvidia/current"
-              fi
               patchelf --set-rpath "$filteredRpath" "$binary"
             '';
           });

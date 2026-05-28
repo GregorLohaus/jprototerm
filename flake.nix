@@ -17,7 +17,7 @@
 
           jlib = jlibghostty.packages.${system}.jlibghostty;
 
-          gluonGraalvm = pkgs.stdenvNoCC.mkDerivation {
+          gluonGraalvm = pkgs.stdenv.mkDerivation {
             pname = "graalvm-java23-gluon";
             version = "23+25.1-dev-2409082136";
 
@@ -25,6 +25,29 @@
               url = "https://github.com/gluonhq/graal/releases/download/gluon-23%2B25.1-dev-2409082136/graalvm-java23-linux-amd64-gluon-23+25.1-dev.tar.gz";
               hash = "sha256-/NyMutn3pT4ZKL2pkzPdBZghxg0ERK5VJ2bFQF0VBfU=";
             };
+
+            nativeBuildInputs = [
+              pkgs.autoPatchelfHook
+            ];
+
+            buildInputs = [
+              pkgs.stdenv.cc.cc.lib
+              pkgs.zlib
+              pkgs.freetype
+              pkgs.fontconfig
+              pkgs.alsa-lib
+              pkgs.glib
+              pkgs.gtk3
+              pkgs.pango
+              pkgs.libx11
+              pkgs.libxext
+              pkgs.libxrender
+              pkgs.libxtst
+              pkgs.libxi
+              pkgs.libxrandr
+              pkgs.libxinerama
+              pkgs.libxcb
+            ];
 
             installPhase = ''
               runHook preInstall
@@ -56,7 +79,6 @@
             pkgs.libxext
             pkgs.libxrender
             pkgs.libxtst
-            pkgs.libxtst.dev
             pkgs.libxi
             pkgs.libxcursor
             pkgs.libxrandr
@@ -135,7 +157,6 @@
             pkgs.libxext
             pkgs.libxrender
             pkgs.libxtst
-            pkgs.libxtst.dev
             pkgs.libxi
             pkgs.libxcursor
             pkgs.libxrandr

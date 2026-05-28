@@ -24,6 +24,10 @@ javafx {
     modules = [ 'javafx.controls', 'javafx.fxml' ]
 }
 
+gluonfx {
+    compilerArgs += ['-H:+ForeignAPISupport']
+}
+
 application {
     mainClass = 'com.gregor.jprototerm.Main'
 }

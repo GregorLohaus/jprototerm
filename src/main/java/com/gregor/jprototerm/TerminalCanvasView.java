@@ -610,13 +610,16 @@ public final class TerminalCanvasView {
         double sourceHeight = bounds.sourceRows() * sourceCellHeight;
         double x = originX + (bounds.minColumn * cellWidth);
         double y = originY + (bounds.minRow * lineHeight);
-        double width = bounds.columns() * cellWidth;
-        double height = bounds.rows() * lineHeight;
+        double availableWidth = bounds.columns() * cellWidth;
+        double availableHeight = bounds.rows() * lineHeight;
 
-        if (sourceWidth <= 0.0 || sourceHeight <= 0.0 || width <= 0.0 || height <= 0.0) {
+        if (sourceWidth <= 0.0 || sourceHeight <= 0.0 || availableWidth <= 0.0 || availableHeight <= 0.0) {
             return;
         }
 
+        double scale = Math.min(availableWidth / sourceWidth, availableHeight / sourceHeight);
+        double width = sourceWidth * scale;
+        double height = sourceHeight * scale;
         gc.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height);
     }
 

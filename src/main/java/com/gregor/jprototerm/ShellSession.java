@@ -19,7 +19,7 @@ public final class ShellSession implements AutoCloseable {
     private final ExecutorService reader;
     private volatile boolean closed;
 
-    private ShellSession(PtyProcess process, TerminalPane pane) {
+    private ShellSession(PtyProcess process) {
         this.process = process;
         this.stdin = process.getOutputStream();
         this.reader = Executors.newSingleThreadExecutor(runnable -> {
@@ -27,7 +27,6 @@ public final class ShellSession implements AutoCloseable {
             thread.setDaemon(true);
             return thread;
         });
-        reader.submit(() -> readOutput(pane));
     }
 
     public static ShellSession start(String shell, TerminalPane pane, int columns, int rows) {
@@ -42,11 +41,15 @@ public final class ShellSession implements AutoCloseable {
                     .setInitialRows(rows)
                     .setDirectory(System.getProperty("user.home"))
                     .start();
-            return new ShellSession(process, pane);
+            return new ShellSession(process);
         } catch (IOException ex) {
             pane.write("failed to start shell: " + ex.getMessage() + "\r\n");
             throw new IllegalStateException("Could not start shell " + shell, ex);
         }
+    }
+
+    public void startReading(TerminalPane pane) {
+        reader.submit(() -> readOutput(pane));
     }
 
     public void resize(int columns, int rows) {
@@ -57,11 +60,15 @@ public final class ShellSession implements AutoCloseable {
     }
 
     public void send(String text) {
+        send(text.getBytes(StandardCharsets.UTF_8));
+    }
+
+    public void send(byte[] bytes) {
         if (closed) {
             return;
         }
         try {
-            stdin.write(text.getBytes(StandardCharsets.UTF_8));
+            stdin.write(bytes);
             stdin.flush();
         } catch (IOException ex) {
             close();

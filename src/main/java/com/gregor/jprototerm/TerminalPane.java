@@ -5,6 +5,7 @@ import dev.jlibghostty.KittyGraphics;
 import dev.jlibghostty.RenderStateSnapshot;
 import dev.jlibghostty.Terminal;
 import dev.jlibghostty.TerminalOptions;
+import dev.jlibghostty.DeviceAttributes;
 
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -32,6 +33,7 @@ public final class TerminalPane implements AutoCloseable {
 
     public static TerminalPane create(int columns, int rows) {
         Terminal terminal = Ghostty.open(TerminalOptions.of(columns, rows));
+        terminal.setDeviceAttributesProvider(DeviceAttributes::xtermCompatible);
         TerminalPane pane = new TerminalPane(terminal, columns, rows);
         pane.refresh();
         return pane;
@@ -53,6 +55,13 @@ public final class TerminalPane implements AutoCloseable {
 
     public void attach(ShellSession session) {
         this.session = session;
+        terminal.setPtyWriter(bytes -> {
+            ShellSession current = this.session;
+            if (current != null) {
+                current.send(bytes);
+            }
+        });
+        session.startReading(this);
     }
 
     public void send(String text) {

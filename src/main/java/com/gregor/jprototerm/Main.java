@@ -3,19 +3,29 @@ package com.gregor.jprototerm;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.scene.Scene;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Dialog;
+import javafx.scene.control.Label;
+import javafx.scene.control.Spinner;
+import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.StackPane;
+import javafx.scene.text.Font;
 import javafx.stage.Stage;
 
 public final class Main extends Application {
     private TerminalWorkspace workspace;
+    private TerminalCanvasView terminalView;
+    private AppConfig config;
 
     @Override
     public void start(Stage stage) {
-        AppConfig config = AppConfig.load();
+        config = AppConfig.load();
 
         workspace = new TerminalWorkspace(config);
-        TerminalCanvasView terminalView = new TerminalCanvasView(workspace, config);
+        terminalView = new TerminalCanvasView(workspace, config);
 
         StackPane root = new StackPane(terminalView.canvas());
         terminalView.canvas().widthProperty().bind(root.widthProperty());
@@ -23,7 +33,7 @@ public final class Main extends Application {
         terminalView.canvas().setOnMousePressed(event -> terminalView.canvas().requestFocus());
 
         Scene scene = new Scene(root, config.windowWidth(), config.windowHeight());
-        scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> handlePressed(config, event));
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, this::handlePressed);
         scene.addEventFilter(KeyEvent.KEY_TYPED, event -> handleTyped(event));
 
         new AnimationTimer() {
@@ -42,7 +52,7 @@ public final class Main extends Application {
         terminalView.canvas().requestFocus();
     }
 
-    private void handlePressed(AppConfig config, KeyEvent event) {
+    private void handlePressed(KeyEvent event) {
         if (config.keybindings().get("navigate_left").matches(event)) {
             workspace.navigate(Direction.LEFT);
             event.consume();
@@ -67,6 +77,9 @@ public final class Main extends Application {
         } else if (config.keybindings().get("close_pane").matches(event)) {
             workspace.closeActivePane();
             event.consume();
+        } else if (config.keybindings().get("open_font_selector").matches(event)) {
+            openFontSelector();
+            event.consume();
         } else {
             String encoded = KeyEncoder.encode(event);
             if (encoded != null) {
@@ -86,6 +99,49 @@ public final class Main extends Application {
             workspace.activePane().send(text);
             event.consume();
         }
+    }
+
+    private void openFontSelector() {
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Font");
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        ComboBox<String> family = new ComboBox<>();
+        family.getItems().setAll(Font.getFamilies());
+        family.setEditable(true);
+        family.setMaxWidth(Double.MAX_VALUE);
+        family.setValue(config.fontFamily());
+
+        Spinner<Double> size = new Spinner<>();
+        size.setEditable(true);
+        size.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(6.0, 48.0, config.fontSize(), 0.5));
+
+        GridPane content = new GridPane();
+        content.setHgap(10.0);
+        content.setVgap(10.0);
+        content.add(new Label("Family"), 0, 0);
+        content.add(family, 1, 0);
+        content.add(new Label("Size"), 0, 1);
+        content.add(size, 1, 1);
+        dialog.getDialogPane().setContent(content);
+
+        dialog.showAndWait()
+                .filter(button -> button == ButtonType.OK)
+                .ifPresent(ignored -> {
+                    String selectedFamily = family.getEditor().getText();
+                    if (selectedFamily == null || selectedFamily.isBlank()) {
+                        selectedFamily = family.getValue();
+                    }
+                    if (selectedFamily == null || selectedFamily.isBlank()) {
+                        return;
+                    }
+
+                    double selectedSize = size.getValue();
+                    config = config.withFont(selectedFamily.trim(), selectedSize);
+                    config.save();
+                    terminalView.setFont(config.fontFamily(), config.fontSize());
+                    terminalView.canvas().requestFocus();
+                });
     }
 
     public static void main(String[] args) {

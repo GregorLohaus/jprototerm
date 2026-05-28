@@ -32,15 +32,24 @@ public final class TerminalCanvasView {
     private final TerminalWorkspace workspace;
     private final AppConfig config;
     private final Map<Long, Image> kittyImageCache = new HashMap<>();
+    private String fontFamily;
+    private double fontSize;
 
     public TerminalCanvasView(TerminalWorkspace workspace, AppConfig config) {
         this.workspace = workspace;
         this.config = config;
+        this.fontFamily = config.fontFamily();
+        this.fontSize = config.fontSize();
         canvas.setFocusTraversable(true);
     }
 
     public Canvas canvas() {
         return canvas;
+    }
+
+    public void setFont(String family, double size) {
+        this.fontFamily = family;
+        this.fontSize = size;
     }
 
     public void render() {
@@ -75,7 +84,7 @@ public final class TerminalCanvasView {
         gc.setLineWidth(workspace.isActive(pane) ? 2.0 : 1.0);
         gc.strokeRect(pane.x() + 0.5, pane.y() + 0.5, pane.width() - 1.0, pane.height() - 1.0);
 
-        Font font = Font.font(config.fontFamily(), config.fontSize());
+        Font font = Font.font(fontFamily, fontSize);
         gc.setFont(font);
 
         FontMetrics metrics = measureFontMetrics(font);
@@ -105,15 +114,14 @@ public final class TerminalCanvasView {
     }
 
     private static FontMetrics measureFontMetrics(Font font) {
-        Text text = new Text("Mg");
+        Text text = new Text("┃MgÅjy");
         text.setFont(font);
-        double textHeight = text.getLayoutBounds().getHeight();
-        double lineHeight = Math.max(1.0, Math.ceil(textHeight * 1.2));
-        double baselineOffset = -text.getLayoutBounds().getMinY() + ((lineHeight - textHeight) / 2.0);
+        double lineHeight = Math.max(1.0, text.getLayoutBounds().getHeight());
+        double baselineOffset = -text.getLayoutBounds().getMinY();
 
         Text cell = new Text("M");
         cell.setFont(font);
-        double cellWidth = Math.max(1.0, Math.ceil(cell.getLayoutBounds().getWidth()));
+        double cellWidth = Math.max(1.0, cell.getLayoutBounds().getWidth());
         return new FontMetrics(cellWidth, lineHeight, baselineOffset);
     }
 

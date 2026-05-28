@@ -34,6 +34,8 @@ If `XDG_CONFIG_HOME` is unset, the fallback is:
 $HOME/.config/jprototerm/config.toml
 ```
 
+If no config file exists, jprototerm writes the default config on startup.
+
 Example, also available in `config.example.toml`:
 
 ```toml
@@ -60,6 +62,7 @@ toggle_floating = "ALT+F"
 new_floating = "ALT+SHIFT+F"
 next_floating = "ALT+F12"
 close_pane = "ALT+X"
+open_font_selector = "ALT+T"
 ```
 
 ## Defaults
@@ -69,5 +72,6 @@ close_pane = "ALT+X"
 - `Alt+Shift+f`: create a new floating pane
 - `Alt+F12`: cycle floating panes
 - `Alt+x`: close the active floating pane
+- `Alt+t`: open the font selector
 - Font default: `JetBrainsMono Nerd Font`
 - Kitty graphics protocol parsing is enabled by default

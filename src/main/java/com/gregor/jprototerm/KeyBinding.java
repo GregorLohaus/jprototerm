@@ -35,6 +35,22 @@ public record KeyBinding(boolean alt, boolean control, boolean shift, KeyCode co
                 && event.getCode() == code;
     }
 
+    @Override
+    public String toString() {
+        StringBuilder builder = new StringBuilder();
+        if (control) {
+            builder.append("CTRL+");
+        }
+        if (alt) {
+            builder.append("ALT+");
+        }
+        if (shift) {
+            builder.append("SHIFT+");
+        }
+        builder.append(code.getName().toUpperCase(Locale.ROOT).replace(' ', '_'));
+        return builder.toString();
+    }
+
     private static KeyCode keyCode(String token) {
         KeyCode alias = switch (token) {
             case "GRAVE", "BACKTICK", "BACK_QUOTE", "`" -> KeyCode.BACK_QUOTE;

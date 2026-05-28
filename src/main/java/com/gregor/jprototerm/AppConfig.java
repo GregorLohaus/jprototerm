@@ -8,7 +8,11 @@ import io.github.wasabithumb.jtoml.value.primitive.TomlPrimitive;
 import io.github.wasabithumb.jtoml.value.table.TomlTable;
 
 import java.nio.file.Files;
+import java.io.IOException;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public record AppConfig(
@@ -22,10 +26,23 @@ public record AppConfig(
         boolean kittyGraphics,
         Map<String, KeyBinding> keybindings
 ) {
+    private static final List<String> KEYBINDING_KEYS = List.of(
+            "navigate_left",
+            "navigate_down",
+            "navigate_up",
+            "navigate_right",
+            "toggle_floating",
+            "new_floating",
+            "next_floating",
+            "close_pane",
+            "open_font_selector"
+    );
+
     public static AppConfig load() {
         AppConfig defaults = defaults();
         Path path = configPath();
         if (!Files.isRegularFile(path)) {
+            writeDefaultConfig(path, defaults);
             return defaults;
         }
 
@@ -40,16 +57,7 @@ public record AppConfig(
                     doubleValue(document, "window.width", defaults.windowWidth),
                     doubleValue(document, "window.height", defaults.windowHeight),
                     booleanValue(document, "kitty_graphics.enabled", defaults.kittyGraphics),
-                    Map.of(
-                            "navigate_left", binding(document, "keybindings.navigate_left", defaults.keybindings.get("navigate_left")),
-                            "navigate_down", binding(document, "keybindings.navigate_down", defaults.keybindings.get("navigate_down")),
-                            "navigate_up", binding(document, "keybindings.navigate_up", defaults.keybindings.get("navigate_up")),
-                            "navigate_right", binding(document, "keybindings.navigate_right", defaults.keybindings.get("navigate_right")),
-                            "toggle_floating", binding(document, "keybindings.toggle_floating", defaults.keybindings.get("toggle_floating")),
-                            "new_floating", binding(document, "keybindings.new_floating", defaults.keybindings.get("new_floating")),
-                            "next_floating", binding(document, "keybindings.next_floating", defaults.keybindings.get("next_floating")),
-                            "close_pane", binding(document, "keybindings.close_pane", defaults.keybindings.get("close_pane"))
-                    )
+                    keybindings(document, defaults)
             );
         } catch (TomlException ex) {
             System.err.println("Could not parse " + path + ": " + ex.getMessage());
@@ -75,9 +83,28 @@ public record AppConfig(
                         "toggle_floating", KeyBinding.parse("ALT+F"),
                         "new_floating", KeyBinding.parse("ALT+SHIFT+F"),
                         "next_floating", KeyBinding.parse("ALT+F12"),
-                        "close_pane", KeyBinding.parse("ALT+X")
+                        "close_pane", KeyBinding.parse("ALT+X"),
+                        "open_font_selector", KeyBinding.parse("ALT+T")
                 )
         );
+    }
+
+    public AppConfig withFont(String family, double size) {
+        return new AppConfig(
+                columns,
+                rows,
+                shell,
+                family,
+                size,
+                windowWidth,
+                windowHeight,
+                kittyGraphics,
+                keybindings
+        );
+    }
+
+    public void save() {
+        save(configPath(), this);
     }
 
     public static Path configPath() {
@@ -90,6 +117,76 @@ public record AppConfig(
 
     private static String defaultShell() {
         return "/bin/bash";
+    }
+
+    private static Map<String, KeyBinding> keybindings(TomlTable table, AppConfig defaults) {
+        Map<String, KeyBinding> parsed = new LinkedHashMap<>();
+        for (String key : KEYBINDING_KEYS) {
+            parsed.put(key, binding(table, "keybindings." + key, defaults.keybindings.get(key)));
+        }
+        return Map.copyOf(parsed);
+    }
+
+    private static void writeDefaultConfig(Path path, AppConfig defaults) {
+        save(path, defaults);
+    }
+
+    private static void save(Path path, AppConfig config) {
+        try {
+            Path parent = path.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.writeString(
+                    path,
+                    config.toToml(),
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.WRITE
+            );
+        } catch (IOException ex) {
+            System.err.println("Could not write " + path + ": " + ex.getMessage());
+        }
+    }
+
+    private String toToml() {
+        StringBuilder builder = new StringBuilder();
+        builder.append("[terminal]\n");
+        builder.append("columns = ").append(columns).append('\n');
+        builder.append("rows = ").append(rows).append('\n');
+        builder.append("shell = ").append(quoted(shell)).append('\n');
+        builder.append("font_family = ").append(quoted(fontFamily)).append('\n');
+        builder.append("font_size = ").append(trimDouble(fontSize)).append("\n\n");
+        builder.append("[window]\n");
+        builder.append("width = ").append(trimDouble(windowWidth)).append('\n');
+        builder.append("height = ").append(trimDouble(windowHeight)).append("\n\n");
+        builder.append("[kitty_graphics]\n");
+        builder.append("enabled = ").append(kittyGraphics).append("\n\n");
+        builder.append("[keybindings]\n");
+        for (String key : KEYBINDING_KEYS) {
+            KeyBinding binding = keybindings.get(key);
+            if (binding != null) {
+                builder.append(key).append(" = ").append(quoted(binding.toString())).append('\n');
+            }
+        }
+        return builder.toString();
+    }
+
+    private static String quoted(String value) {
+        return "\"" + value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t")
+                + "\"";
+    }
+
+    private static String trimDouble(double value) {
+        if (value == Math.rint(value)) {
+            return Long.toString((long) value);
+        }
+        return Double.toString(value);
     }
 
     private static KeyBinding binding(TomlTable table, String key, KeyBinding fallback) {

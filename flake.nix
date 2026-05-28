@@ -17,6 +17,11 @@
 
           jlib = jlibghostty.packages.${system}.jlibghostty;
 
+          javafxStaticSdkZip = pkgs.fetchurl {
+            url = "https://download2.gluonhq.com/substrate/javafxstaticsdk/openjfx-21-ea+11.3-linux-x86_64-static.zip";
+            hash = "sha256-ovoByMPwhvU54mtxGYyrgLxDLNn0tA3XUK3rtnGfAAM=";
+          };
+
           gluonGraalvm = pkgs.stdenv.mkDerivation {
             pname = "graalvm-java23-gluon";
             version = "23+25.1-dev-2409082136";
@@ -113,6 +118,8 @@
             gradleUpdateTask = "nixDownloadDeps";
             gradleFlags = [
               "--no-build-cache"
+              "--stacktrace"
+              "--info"
               "-Dorg.gradle.java.home=${gluonGraalvm}"
             ];
 
@@ -120,8 +127,16 @@
             JAVA_HOME = "${gluonGraalvm}";
             JLIBGHOSTTY_MAVEN_REPO = "${jlib}/maven";
 
+            preConfigure = ''
+              export HOME="$TMPDIR/home"
+              mkdir -p "$HOME/.gluon/substrate"
+              cp ${javafxStaticSdkZip} "$HOME/.gluon/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+            '';
+
             preBuild = ''
               export HOME="$TMPDIR/home"
+              mkdir -p "$HOME/.gluon/substrate"
+              cp ${javafxStaticSdkZip} "$HOME/.gluon/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath runtimeLibs}:$LD_LIBRARY_PATH"
             '';
 

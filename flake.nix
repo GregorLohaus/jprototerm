@@ -226,8 +226,8 @@
               cp "$binary" "$out/bin/jprototerm"
 
               wrapProgram "$out/bin/jprototerm" \
-                --run 'glShimDir="''${XDG_RUNTIME_DIR:-/tmp}/jprototerm-gl"; mkdir -p "$glShimDir"; for lib in /lib/x86_64-linux-gnu/libGL.so.1 /lib/x86_64-linux-gnu/libGLX.so.0 /lib/x86_64-linux-gnu/libGLdispatch.so.0 /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.0 /usr/lib/x86_64-linux-gnu/nvidia/current/lib*.so*; do [ -e "$lib" ] && ln -sfn "$lib" "$glShimDir/$(basename "$lib")"; done; export LD_LIBRARY_PATH="$glShimDir''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; export __GLX_VENDOR_LIBRARY_NAME="''${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"' \
                 --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}" \
+                --run 'glShimDir="''${XDG_RUNTIME_DIR:-/tmp}/jprototerm-gl"; mkdir -p "$glShimDir"; for lib in /lib/x86_64-linux-gnu/libGL.so.1 /lib/x86_64-linux-gnu/libGLX.so.0 /lib/x86_64-linux-gnu/libGLdispatch.so.0 /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so* /usr/lib/x86_64-linux-gnu/libEGL_nvidia.so* /usr/lib/x86_64-linux-gnu/libnvidia*.so* /usr/lib/x86_64-linux-gnu/nvidia/current/lib*.so*; do [ -e "$lib" ] && ln -sfn "$lib" "$glShimDir/$(basename "$lib")"; done; export LD_LIBRARY_PATH="$glShimDir''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; export __GLX_VENDOR_LIBRARY_NAME="''${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"; if [ -e /usr/share/glvnd/egl_vendor.d/10_nvidia.json ]; then export __EGL_VENDOR_LIBRARY_FILENAMES="''${__EGL_VENDOR_LIBRARY_FILENAMES:-/usr/share/glvnd/egl_vendor.d/10_nvidia.json}"; fi' \
                 --set GDK_BACKEND x11
 
               runHook postInstall

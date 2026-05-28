@@ -22,6 +22,34 @@
             hash = "sha256-ovoByMPwhvU54mtxGYyrgLxDLNn0tA3XUK3rtnGfAAM=";
           };
 
+          patchedSubstrateJar =
+            let
+              substrateJar = pkgs.fetchurl {
+                url = "https://plugins.gradle.org/m2/com/gluonhq/substrate/0.0.68/substrate-0.0.68.jar";
+                hash = "sha256-ZOchzSN8IPSQVnItGAvo3T6OG93G0lqU+BmemdFa6lE=";
+              };
+            in
+            pkgs.runCommand "substrate-0.0.68-patched.jar"
+              {
+                nativeBuildInputs = [
+                  pkgs.unzip
+                  pkgs.zip
+                ];
+              }
+              ''
+                mkdir work
+                cd work
+                unzip -q ${substrateJar}
+
+                # Gluon Substrate hardcodes /usr/bin/pkg-config. Keep the
+                # replacement string the same byte length to avoid rewriting
+                # the Java class constant pool structure.
+                substituteInPlace com/gluonhq/substrate/util/linux/LinuxLinkerFlags.class \
+                  --replace-fail "/usr/bin/pkg-config" "/tmp/nix/pkg-config"
+
+                zip -qr "$out" .
+              '';
+
           gluonGraalvm = pkgs.stdenv.mkDerivation {
             pname = "graalvm-java23-gluon";
             version = "23+25.1-dev-2409082136";
@@ -107,20 +135,31 @@
 
             buildInputs = runtimeLibs;
 
-            # Gluon Substrate 0.0.68 hardcodes /usr/bin/pkg-config in
-            # com.gluonhq.substrate.util.linux.LinuxLinkerFlags.
-            # Expose the host path while keeping pkg-config and .pc files
-            # available from Nix through nativeBuildInputs/buildInputs.
-            __impureHostDeps = [
-              "/usr/bin/pkg-config"
-            ];
-
-            mitmCache = pkgs.gradle_9.fetchDeps {
+            baseMitmCache = pkgs.gradle_9.fetchDeps {
               pkg = finalAttrs.finalPackage;
               data = ./deps.json;
               silent = false;
               useBwrap = false;
             };
+
+            mitmCache = pkgs.runCommand "jprototerm-deps-patched"
+              {
+                passthru.updateScript = finalAttrs.baseMitmCache.updateScript;
+              }
+              ''
+                mkdir -p "$out"
+                cp -a ${finalAttrs.baseMitmCache}/. "$out/"
+
+                substratePath="$out/https/plugins.gradle.org/m2/com/gluonhq/substrate/0.0.68/substrate-0.0.68.jar"
+                if [ ! -e "$substratePath" ]; then
+                  echo "Could not find substrate jar in Gradle MITM cache: $substratePath" >&2
+                  find "$out" -path '*substrate*' -print >&2
+                  exit 1
+                fi
+
+                rm "$substratePath"
+                ln -s ${patchedSubstrateJar} "$substratePath"
+              '';
 
             gradleBuildTask = "nativeBuild";
             gradleUpdateTask = "nixDownloadDeps";
@@ -138,9 +177,8 @@
             preConfigure = ''
               export HOME="$TMPDIR/home"
               export GRADLE_OPTS="-Duser.home=$HOME ''${GRADLE_OPTS:-}"
-              mkdir -p "$TMPDIR/usr/bin"
-              ln -sfn ${pkgs.pkg-config}/bin/pkg-config "$TMPDIR/usr/bin/pkg-config"
-              export PATH="$TMPDIR/usr/bin:$PATH"
+              mkdir -p /tmp/nix
+              ln -sfn ${pkgs.pkg-config}/bin/pkg-config /tmp/nix/pkg-config
               for gluonHome in "$HOME/.gluon" /build/.gluon; do
                 mkdir -p "$gluonHome/substrate"
                 cp -f ${javafxStaticSdkZip} "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
@@ -151,9 +189,8 @@
             preBuild = ''
               export HOME="$TMPDIR/home"
               export GRADLE_OPTS="-Duser.home=$HOME ''${GRADLE_OPTS:-}"
-              mkdir -p "$TMPDIR/usr/bin"
-              ln -sfn ${pkgs.pkg-config}/bin/pkg-config "$TMPDIR/usr/bin/pkg-config"
-              export PATH="$TMPDIR/usr/bin:$PATH"
+              mkdir -p /tmp/nix
+              ln -sfn ${pkgs.pkg-config}/bin/pkg-config /tmp/nix/pkg-config
               for gluonHome in "$HOME/.gluon" /build/.gluon; do
                 mkdir -p "$gluonHome/substrate"
                 cp -f ${javafxStaticSdkZip} "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"

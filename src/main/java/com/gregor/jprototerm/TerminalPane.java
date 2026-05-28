@@ -2,7 +2,12 @@ package com.gregor.jprototerm;
 
 import dev.jlibghostty.Ghostty;
 import dev.jlibghostty.KittyGraphics;
+import dev.jlibghostty.MouseAction;
+import dev.jlibghostty.MouseEncoder;
+import dev.jlibghostty.MouseEncoderSize;
+import dev.jlibghostty.MouseInput;
 import dev.jlibghostty.RenderStateSnapshot;
+import dev.jlibghostty.ScrollViewport;
 import dev.jlibghostty.Terminal;
 import dev.jlibghostty.TerminalOptions;
 import dev.jlibghostty.DeviceAttributes;
@@ -12,6 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public final class TerminalPane implements AutoCloseable {
     private final Terminal terminal;
+    private final MouseEncoder mouseEncoder = new MouseEncoder();
     private final AtomicReference<RenderStateSnapshot> renderSnapshot = new AtomicReference<>();
     private ShellSession session;
     private boolean floating;
@@ -31,8 +37,8 @@ public final class TerminalPane implements AutoCloseable {
         this.rows = rows;
     }
 
-    public static TerminalPane create(int columns, int rows) {
-        Terminal terminal = Ghostty.open(TerminalOptions.of(columns, rows));
+    public static TerminalPane create(int columns, int rows, long maxScrollback) {
+        Terminal terminal = Ghostty.open(new TerminalOptions(columns, rows, maxScrollback));
         terminal.setDeviceAttributesProvider(DeviceAttributes::xtermCompatible);
         TerminalPane pane = new TerminalPane(terminal, columns, rows);
         pane.refresh();
@@ -65,8 +71,42 @@ public final class TerminalPane implements AutoCloseable {
     }
 
     public void send(String text) {
+        scrollViewportToBottom();
         if (session != null) {
             session.send(text);
+        }
+    }
+
+    public boolean sendMouse(MouseInput input, MouseEncoderSize size, boolean anyButtonPressed) {
+        synchronized (terminal) {
+            mouseEncoder.syncFromTerminal(terminal);
+            mouseEncoder.setSize(size);
+            mouseEncoder.setAnyButtonPressed(anyButtonPressed);
+            mouseEncoder.setTrackLastCell(input.action() == MouseAction.MOTION && input.button().isEmpty());
+
+            byte[] encoded = mouseEncoder.encode(input);
+            if (encoded.length == 0) {
+                return false;
+            }
+
+            if (session != null) {
+                session.send(encoded);
+            }
+            return true;
+        }
+    }
+
+    public void scrollViewport(long rows) {
+        synchronized (terminal) {
+            terminal.scrollViewport(ScrollViewport.delta(rows));
+            refresh();
+        }
+    }
+
+    public void scrollViewportToBottom() {
+        synchronized (terminal) {
+            terminal.scrollViewport(ScrollViewport.bottom());
+            refresh();
         }
     }
 
@@ -150,6 +190,7 @@ public final class TerminalPane implements AutoCloseable {
             session.close();
             session = null;
         }
+        mouseEncoder.close();
         terminal.close();
     }
 }

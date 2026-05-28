@@ -5,6 +5,10 @@ import dev.jlibghostty.KittyImageFormat;
 import dev.jlibghostty.KittyImageSnapshot;
 import dev.jlibghostty.KittyPlacement;
 import dev.jlibghostty.KittyRenderInfo;
+import dev.jlibghostty.KeyModifiers;
+import dev.jlibghostty.MouseButton;
+import dev.jlibghostty.MouseEncoderSize;
+import dev.jlibghostty.MouseInput;
 import dev.jlibghostty.RenderCell;
 import dev.jlibghostty.RenderColor;
 import dev.jlibghostty.RenderCursorStyle;
@@ -15,6 +19,10 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
+import javafx.scene.input.InputEvent;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.input.ScrollEvent;
+import javafx.scene.input.ScrollEvent.VerticalTextScrollUnits;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontSmoothingType;
@@ -34,6 +42,8 @@ public final class TerminalCanvasView {
     private final Map<Long, Image> kittyImageCache = new HashMap<>();
     private String fontFamily;
     private double fontSize;
+    private boolean mouseButtonPressed;
+    private MouseButton pressedButton = MouseButton.UNKNOWN;
 
     public TerminalCanvasView(TerminalWorkspace workspace, AppConfig config) {
         this.workspace = workspace;
@@ -41,6 +51,11 @@ public final class TerminalCanvasView {
         this.fontFamily = config.fontFamily();
         this.fontSize = config.fontSize();
         canvas.setFocusTraversable(true);
+        canvas.setOnMousePressed(this::handleMousePressed);
+        canvas.setOnMouseReleased(this::handleMouseReleased);
+        canvas.setOnMouseDragged(this::handleMouseDragged);
+        canvas.setOnMouseMoved(this::handleMouseMoved);
+        canvas.setOnScroll(this::handleScroll);
     }
 
     public Canvas canvas() {
@@ -119,10 +134,185 @@ public final class TerminalCanvasView {
         double lineHeight = Math.max(1.0, text.getLayoutBounds().getHeight());
         double baselineOffset = -text.getLayoutBounds().getMinY();
 
-        Text cell = new Text("M");
+        String sample = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        Text cell = new Text(sample);
         cell.setFont(font);
-        double cellWidth = Math.max(1.0, cell.getLayoutBounds().getWidth());
+        double cellWidth = Math.max(1.0, cell.getLayoutBounds().getWidth() / sample.length());
         return new FontMetrics(cellWidth, lineHeight, baselineOffset);
+    }
+
+    private void handleMousePressed(MouseEvent event) {
+        canvas.requestFocus();
+        TerminalPane pane = paneAt(event.getX(), event.getY());
+        if (pane == null) {
+            return;
+        }
+
+        workspace.focus(pane);
+        pressedButton = mouseButton(event);
+        mouseButtonPressed = true;
+        sendMouse(pane, MouseInput.press(pressedButton, eventX(pane, event.getX()), eventY(pane, event.getY()), modifiers(event)), true, event);
+    }
+
+    private void handleMouseReleased(MouseEvent event) {
+        TerminalPane pane = paneAt(event.getX(), event.getY());
+        if (pane == null) {
+            pane = workspace.activePane();
+        }
+
+        MouseButton button = pressedButton == MouseButton.UNKNOWN ? mouseButton(event) : pressedButton;
+        sendMouse(pane, MouseInput.release(button, eventX(pane, event.getX()), eventY(pane, event.getY()), modifiers(event)), false, event);
+        mouseButtonPressed = false;
+        pressedButton = MouseButton.UNKNOWN;
+    }
+
+    private void handleMouseDragged(MouseEvent event) {
+        TerminalPane pane = paneAt(event.getX(), event.getY());
+        if (pane == null) {
+            pane = workspace.activePane();
+        }
+
+        MouseButton button = pressedButton == MouseButton.UNKNOWN ? mouseButton(event) : pressedButton;
+        sendMouse(pane, MouseInput.drag(button, eventX(pane, event.getX()), eventY(pane, event.getY()), modifiers(event)), true, event);
+    }
+
+    private void handleMouseMoved(MouseEvent event) {
+        TerminalPane pane = paneAt(event.getX(), event.getY());
+        if (pane == null) {
+            return;
+        }
+
+        sendMouse(pane, MouseInput.motion(eventX(pane, event.getX()), eventY(pane, event.getY()), modifiers(event)), mouseButtonPressed, event);
+    }
+
+    private void handleScroll(ScrollEvent event) {
+        TerminalPane pane = paneAt(event.getX(), event.getY());
+        if (pane == null) {
+            return;
+        }
+
+        canvas.requestFocus();
+        workspace.focus(pane);
+        int direction = scrollDirection(event);
+        if (direction == 0) {
+            return;
+        }
+
+        MouseButton wheelButton = direction > 0 ? MouseButton.FOUR : MouseButton.FIVE;
+        int rows = scrollRows(event);
+        boolean sent = false;
+        for (int i = 0; i < rows; i++) {
+            sent |= sendMouse(
+                    pane,
+                    MouseInput.press(wheelButton, eventX(pane, event.getX()), eventY(pane, event.getY()), modifiers(event)),
+                    mouseButtonPressed,
+                    event
+            );
+        }
+        if (!sent) {
+            pane.scrollViewport(direction > 0 ? -rows : rows);
+            event.consume();
+        }
+    }
+
+    private boolean sendMouse(TerminalPane pane, MouseInput input, boolean anyButtonPressed, InputEvent event) {
+        MouseTarget target = mouseTarget(pane);
+        if (target == null) {
+            return false;
+        }
+
+        boolean sent = pane.sendMouse(input, target.size(), anyButtonPressed);
+        if (sent) {
+            event.consume();
+        }
+        return sent;
+    }
+
+    private TerminalPane paneAt(double x, double y) {
+        java.util.List<TerminalPane> panes = workspace.panes();
+        for (int i = panes.size() - 1; i >= 0; i--) {
+            TerminalPane pane = panes.get(i);
+            if (x >= pane.x() && x < pane.x() + pane.width() && y >= pane.y() && y < pane.y() + pane.height()) {
+                return pane;
+            }
+        }
+        return null;
+    }
+
+    private MouseTarget mouseTarget(TerminalPane pane) {
+        if (pane.width() <= 24.0 || pane.height() <= 24.0) {
+            return null;
+        }
+
+        FontMetrics metrics = measureFontMetrics(Font.font(fontFamily, fontSize));
+        int columns = Math.max(1, (int) ((pane.width() - 24.0) / metrics.cellWidth));
+        int rows = Math.max(1, (int) ((pane.height() - 24.0) / metrics.lineHeight));
+        long cellWidth = Math.max(1L, Math.round(metrics.cellWidth));
+        long cellHeight = Math.max(1L, Math.round(metrics.lineHeight));
+        long screenWidth = Math.max(1L, Math.round(columns * metrics.cellWidth));
+        long screenHeight = Math.max(1L, Math.round(rows * metrics.lineHeight));
+        return new MouseTarget(MouseEncoderSize.of(screenWidth, screenHeight, cellWidth, cellHeight), screenWidth, screenHeight);
+    }
+
+    private double eventX(TerminalPane pane, double canvasX) {
+        MouseTarget target = mouseTarget(pane);
+        if (target == null) {
+            return 0.0;
+        }
+        return clamp(canvasX - pane.x() - 12.0, 0.0, target.screenWidth() - 1.0);
+    }
+
+    private double eventY(TerminalPane pane, double canvasY) {
+        MouseTarget target = mouseTarget(pane);
+        if (target == null) {
+            return 0.0;
+        }
+        return clamp(canvasY - pane.y() - 12.0, 0.0, target.screenHeight() - 1.0);
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static KeyModifiers modifiers(MouseEvent event) {
+        return KeyModifiers.of(event.isShiftDown(), event.isControlDown(), event.isAltDown(), event.isMetaDown());
+    }
+
+    private static KeyModifiers modifiers(ScrollEvent event) {
+        return KeyModifiers.of(event.isShiftDown(), event.isControlDown(), event.isAltDown(), event.isMetaDown());
+    }
+
+    private static int scrollRows(ScrollEvent event) {
+        double rows;
+        if (event.getTextDeltaYUnits() == VerticalTextScrollUnits.LINES && event.getTextDeltaY() != 0.0) {
+            rows = Math.abs(event.getTextDeltaY());
+        } else if (event.getTextDeltaYUnits() == VerticalTextScrollUnits.PAGES && event.getTextDeltaY() != 0.0) {
+            rows = Math.abs(event.getTextDeltaY()) * 24.0;
+        } else if (event.getMultiplierY() > 0.0) {
+            rows = Math.abs(event.getDeltaY()) / event.getMultiplierY();
+        } else {
+            rows = Math.abs(event.getDeltaY()) / 40.0;
+        }
+        return Math.max(1, Math.min(64, (int) Math.ceil(rows)));
+    }
+
+    private static int scrollDirection(ScrollEvent event) {
+        if (event.getDeltaY() != 0.0) {
+            return event.getDeltaY() > 0.0 ? 1 : -1;
+        }
+        if (event.getTextDeltaYUnits() != VerticalTextScrollUnits.NONE && event.getTextDeltaY() != 0.0) {
+            return event.getTextDeltaY() > 0.0 ? 1 : -1;
+        }
+        return 0;
+    }
+
+    private static MouseButton mouseButton(MouseEvent event) {
+        return switch (event.getButton()) {
+            case PRIMARY -> MouseButton.LEFT;
+            case SECONDARY -> MouseButton.RIGHT;
+            case MIDDLE -> MouseButton.MIDDLE;
+            default -> MouseButton.UNKNOWN;
+        };
     }
 
     private static void drawRow(
@@ -139,11 +329,11 @@ public final class TerminalCanvasView {
             double cellTop = top + (row.row() * lineHeight);
             cell.background().ifPresent(background -> {
                 gc.setFill(toFxColor(background));
-                gc.fillRect(x, cellTop, cellWidth, lineHeight);
+                fillCellRect(gc, x, cellTop, cellWidth, lineHeight);
             });
             if (cell.selected()) {
                 gc.setFill(SELECTED_BACKGROUND);
-                gc.fillRect(x, cellTop, cellWidth, lineHeight);
+                fillCellRect(gc, x, cellTop, cellWidth, lineHeight);
             }
             if (cell.codepoints().length == 0) {
                 continue;
@@ -154,6 +344,14 @@ public final class TerminalCanvasView {
             gc.setFill(foreground);
             gc.fillText(cell.text(), x, y);
         }
+    }
+
+    private static void fillCellRect(GraphicsContext gc, double x, double y, double width, double height) {
+        double x1 = Math.floor(x);
+        double y1 = Math.floor(y);
+        double x2 = Math.ceil(x + width);
+        double y2 = Math.ceil(y + height);
+        gc.fillRect(x1, y1, Math.max(1.0, x2 - x1), Math.max(1.0, y2 - y1));
     }
 
     private static Color toFxColor(RenderColor color) {
@@ -252,5 +450,8 @@ public final class TerminalCanvasView {
     }
 
     private record FontMetrics(double cellWidth, double lineHeight, double baselineOffset) {
+    }
+
+    private record MouseTarget(MouseEncoderSize size, long screenWidth, long screenHeight) {
     }
 }

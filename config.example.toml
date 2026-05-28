@@ -1,6 +1,7 @@
 [terminal]
 columns = 100
 rows = 30
+max_scrollback = 100000
 shell = "/bin/bash"
 font_family = "JetBrainsMono Nerd Font"
 font_size = 15

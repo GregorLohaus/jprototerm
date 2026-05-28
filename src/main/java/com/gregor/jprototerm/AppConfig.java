@@ -18,6 +18,7 @@ import java.util.Map;
 public record AppConfig(
         int columns,
         int rows,
+        long maxScrollback,
         String shell,
         String fontFamily,
         double fontSize,
@@ -51,6 +52,7 @@ public record AppConfig(
             return new AppConfig(
                     intValue(document, "terminal.columns", defaults.columns),
                     intValue(document, "terminal.rows", defaults.rows),
+                    longValue(document, "terminal.max_scrollback", defaults.maxScrollback),
                     stringValue(document, "terminal.shell", defaults.shell),
                     stringValue(document, "terminal.font_family", defaults.fontFamily),
                     doubleValue(document, "terminal.font_size", defaults.fontSize),
@@ -69,6 +71,7 @@ public record AppConfig(
         return new AppConfig(
                 100,
                 30,
+                100_000,
                 defaultShell(),
                 "JetBrainsMono Nerd Font",
                 15.0,
@@ -93,6 +96,7 @@ public record AppConfig(
         return new AppConfig(
                 columns,
                 rows,
+                maxScrollback,
                 shell,
                 family,
                 size,
@@ -154,6 +158,7 @@ public record AppConfig(
         builder.append("[terminal]\n");
         builder.append("columns = ").append(columns).append('\n');
         builder.append("rows = ").append(rows).append('\n');
+        builder.append("max_scrollback = ").append(maxScrollback).append('\n');
         builder.append("shell = ").append(quoted(shell)).append('\n');
         builder.append("font_family = ").append(quoted(fontFamily)).append('\n');
         builder.append("font_size = ").append(trimDouble(fontSize)).append("\n\n");
@@ -207,6 +212,18 @@ public record AppConfig(
     }
 
     private static int intValue(TomlTable table, String key, int fallback) {
+        TomlPrimitive primitive = primitive(table, key);
+        if (primitive == null) {
+            return fallback;
+        }
+        try {
+            return primitive.asInteger();
+        } catch (RuntimeException ex) {
+            return fallback;
+        }
+    }
+
+    private static long longValue(TomlTable table, String key, long fallback) {
         TomlPrimitive primitive = primitive(table, key);
         if (primitive == null) {
             return fallback;

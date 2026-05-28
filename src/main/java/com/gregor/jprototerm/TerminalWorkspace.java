@@ -38,6 +38,13 @@ public final class TerminalWorkspace implements AutoCloseable {
         return activePane() == pane;
     }
 
+    public void focus(TerminalPane pane) {
+        int index = panes.indexOf(pane);
+        if (index >= 0 && pane.visible()) {
+            activeIndex = index;
+        }
+    }
+
     public void layout(double width, double height) {
         List<TerminalPane> tiled = panes.stream()
                 .filter(TerminalPane::visible)
@@ -235,7 +242,7 @@ public final class TerminalWorkspace implements AutoCloseable {
     }
 
     private TerminalPane openPane(boolean floating) {
-        TerminalPane pane = TerminalPane.create(config.columns(), config.rows());
+        TerminalPane pane = TerminalPane.create(config.columns(), config.rows(), config.maxScrollback());
         pane.setFloating(floating);
         pane.attach(ShellSession.start(config.shell(), pane, config.columns(), config.rows()));
         return pane;

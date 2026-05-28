@@ -30,7 +30,6 @@ public final class Main extends Application {
         StackPane root = new StackPane(terminalView.canvas());
         terminalView.canvas().widthProperty().bind(root.widthProperty());
         terminalView.canvas().heightProperty().bind(root.heightProperty());
-        terminalView.canvas().setOnMousePressed(event -> terminalView.canvas().requestFocus());
 
         Scene scene = new Scene(root, config.windowWidth(), config.windowHeight());
         scene.addEventFilter(KeyEvent.KEY_PRESSED, this::handlePressed);

@@ -16,6 +16,9 @@ enabled = true
 [scrollback]
 editor_command = "vi {file}"
 
+[env.override]
+ZELLIJ_SESSION_NAME = ""
+
 [keybindings]
 navigate_left = "ALT+H"
 navigate_down = "ALT+J"

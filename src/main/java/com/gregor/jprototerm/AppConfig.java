@@ -3,6 +3,7 @@ package com.gregor.jprototerm;
 import io.github.wasabithumb.jtoml.JToml;
 import io.github.wasabithumb.jtoml.document.TomlDocument;
 import io.github.wasabithumb.jtoml.except.TomlException;
+import io.github.wasabithumb.jtoml.key.TomlKey;
 import io.github.wasabithumb.jtoml.value.TomlValue;
 import io.github.wasabithumb.jtoml.value.primitive.TomlPrimitive;
 import io.github.wasabithumb.jtoml.value.table.TomlTable;
@@ -26,6 +27,7 @@ public record AppConfig(
         double windowHeight,
         boolean kittyGraphics,
         String scrollbackEditorCommand,
+        Map<String, String> envOverride,
         Map<String, KeyBinding> keybindings
 ) {
     private static final List<String> KEYBINDING_KEYS = List.of(
@@ -62,6 +64,7 @@ public record AppConfig(
                     doubleValue(document, "window.height", defaults.windowHeight),
                     booleanValue(document, "kitty_graphics.enabled", defaults.kittyGraphics),
                     stringValue(document, "scrollback.editor_command", defaults.scrollbackEditorCommand),
+                    envOverride(document, defaults.envOverride),
                     keybindings(document, defaults)
             );
         } catch (TomlException ex) {
@@ -82,6 +85,7 @@ public record AppConfig(
                 760.0,
                 true,
                 defaultScrollbackEditorCommand(),
+                Map.of(),
                 Map.of(
                         "navigate_left", KeyBinding.parse("ALT+H"),
                         "navigate_down", KeyBinding.parse("ALT+J"),
@@ -109,6 +113,7 @@ public record AppConfig(
                 windowHeight,
                 kittyGraphics,
                 scrollbackEditorCommand,
+                envOverride,
                 keybindings
         );
     }
@@ -183,6 +188,11 @@ public record AppConfig(
         builder.append("enabled = ").append(kittyGraphics).append("\n\n");
         builder.append("[scrollback]\n");
         builder.append("editor_command = ").append(quoted(scrollbackEditorCommand)).append("\n\n");
+        builder.append("[env.override]\n");
+        for (Map.Entry<String, String> entry : envOverride.entrySet()) {
+            builder.append(entry.getKey()).append(" = ").append(quoted(entry.getValue())).append('\n');
+        }
+        builder.append('\n');
         builder.append("[keybindings]\n");
         for (String key : KEYBINDING_KEYS) {
             KeyBinding binding = keybindings.get(key);
@@ -220,6 +230,31 @@ public record AppConfig(
         } catch (IllegalArgumentException ex) {
             return fallback;
         }
+    }
+
+    private static Map<String, String> envOverride(TomlTable table, Map<String, String> fallback) {
+        TomlValue value = table.get("env.override");
+        if (value == null || !value.isTable()) {
+            return fallback;
+        }
+
+        Map<String, String> result = new LinkedHashMap<>();
+        TomlTable overrides = value.asTable();
+        for (TomlKey key : overrides.keys(false)) {
+            if (key.size() != 1) {
+                continue;
+            }
+
+            TomlValue override = overrides.get(key);
+            if (override != null && override.isPrimitive()) {
+                try {
+                    result.put(key.get(0), override.asPrimitive().asString());
+                } catch (RuntimeException ignored) {
+                    // Ignore non-string values; environment values are strings.
+                }
+            }
+        }
+        return Map.copyOf(result);
     }
 
     private static String stringValue(TomlTable table, String key, String fallback) {

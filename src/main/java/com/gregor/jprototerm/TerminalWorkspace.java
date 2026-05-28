@@ -259,7 +259,7 @@ public final class TerminalWorkspace implements AutoCloseable {
     private TerminalPane openPane(boolean floating) {
         TerminalPane pane = TerminalPane.create(config.columns(), config.rows(), config.maxScrollback());
         pane.setFloating(floating);
-        pane.attach(ShellSession.start(config.shell(), pane, config.columns(), config.rows()));
+        pane.attach(ShellSession.start(config.shell(), config.envOverride(), pane, config.columns(), config.rows()));
         return pane;
     }
 

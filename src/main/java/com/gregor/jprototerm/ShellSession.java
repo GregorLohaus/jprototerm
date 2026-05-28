@@ -29,11 +29,12 @@ public final class ShellSession implements AutoCloseable {
         });
     }
 
-    public static ShellSession start(String shell, TerminalPane pane, int columns, int rows) {
+    public static ShellSession start(String shell, Map<String, String> envOverride, TerminalPane pane, int columns, int rows) {
         try {
             Map<String, String> environment = new HashMap<>(System.getenv());
             environment.put("TERM", "xterm-kitty");
             environment.put("COLORTERM", "truecolor");
+            environment.putAll(envOverride);
 
             PtyProcess process = new PtyProcessBuilder(new String[] {shell, "-i"})
                     .setEnvironment(environment)

@@ -107,6 +107,14 @@
 
             buildInputs = runtimeLibs;
 
+            # Gluon Substrate 0.0.68 hardcodes /usr/bin/pkg-config in
+            # com.gluonhq.substrate.util.linux.LinuxLinkerFlags.
+            # Expose the host path while keeping pkg-config and .pc files
+            # available from Nix through nativeBuildInputs/buildInputs.
+            __impureHostDeps = [
+              "/usr/bin/pkg-config"
+            ];
+
             mitmCache = pkgs.gradle_9.fetchDeps {
               pkg = finalAttrs.finalPackage;
               data = ./deps.json;
@@ -130,6 +138,9 @@
             preConfigure = ''
               export HOME="$TMPDIR/home"
               export GRADLE_OPTS="-Duser.home=$HOME ''${GRADLE_OPTS:-}"
+              mkdir -p "$TMPDIR/usr/bin"
+              ln -sfn ${pkgs.pkg-config}/bin/pkg-config "$TMPDIR/usr/bin/pkg-config"
+              export PATH="$TMPDIR/usr/bin:$PATH"
               for gluonHome in "$HOME/.gluon" /build/.gluon; do
                 mkdir -p "$gluonHome/substrate"
                 cp -f ${javafxStaticSdkZip} "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
@@ -140,6 +151,9 @@
             preBuild = ''
               export HOME="$TMPDIR/home"
               export GRADLE_OPTS="-Duser.home=$HOME ''${GRADLE_OPTS:-}"
+              mkdir -p "$TMPDIR/usr/bin"
+              ln -sfn ${pkgs.pkg-config}/bin/pkg-config "$TMPDIR/usr/bin/pkg-config"
+              export PATH="$TMPDIR/usr/bin:$PATH"
               for gluonHome in "$HOME/.gluon" /build/.gluon; do
                 mkdir -p "$gluonHome/substrate"
                 cp -f ${javafxStaticSdkZip} "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"

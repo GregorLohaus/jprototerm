@@ -105,7 +105,6 @@
           };
 
           runtimeLibs = [
-            pkgs.libglvnd
             pkgs.glib
             pkgs.gtk3
             pkgs.pango
@@ -226,7 +225,7 @@
               cp "$binary" "$out/bin/jprototerm"
               wrapProgram "$out/bin/jprototerm" \
                 --run 'if [ -d /usr/lib/x86_64-linux-gnu/nvidia/current ]; then export __GLX_VENDOR_LIBRARY_NAME="''${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"; fi' \
-                --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}:/usr/lib/x86_64-linux-gnu/nvidia/current" \
+                --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}" \
                 --set GDK_BACKEND x11
 
               runHook postInstall
@@ -242,7 +241,6 @@
           pkgs = import nixpkgs { inherit system; };
           jlib = jlibghostty.packages.${system}.jlibghostty;
           runtimeLibs = [
-            pkgs.libglvnd
             pkgs.glib
             pkgs.gtk3
             pkgs.pango

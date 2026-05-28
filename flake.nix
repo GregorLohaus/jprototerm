@@ -228,6 +228,7 @@
               wrapProgram "$out/bin/jprototerm" \
                 --run 'if [ -d /usr/lib/x86_64-linux-gnu/nvidia/current ]; then export __GLX_VENDOR_LIBRARY_NAME="''${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"; fi' \
                 --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}" \
+                --suffix LD_LIBRARY_PATH : "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/nvidia/current" \
                 --set GDK_BACKEND x11
 
               runHook postInstall

@@ -224,6 +224,7 @@
 
               cp "$binary" "$out/bin/jprototerm"
               wrapProgram "$out/bin/jprototerm" \
+                --run 'if [ -d /usr/lib/x86_64-linux-gnu/nvidia/current ]; then export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/nvidia/current''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; export __GLX_VENDOR_LIBRARY_NAME="''${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"; fi' \
                 --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}" \
                 --set GDK_BACKEND x11
 

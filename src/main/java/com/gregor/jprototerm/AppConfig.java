@@ -25,6 +25,7 @@ public record AppConfig(
         double windowWidth,
         double windowHeight,
         boolean kittyGraphics,
+        String scrollbackEditorCommand,
         Map<String, KeyBinding> keybindings
 ) {
     private static final List<String> KEYBINDING_KEYS = List.of(
@@ -36,7 +37,8 @@ public record AppConfig(
             "new_floating",
             "next_floating",
             "close_pane",
-            "open_font_selector"
+            "open_font_selector",
+            "open_scrollback"
     );
 
     public static AppConfig load() {
@@ -59,6 +61,7 @@ public record AppConfig(
                     doubleValue(document, "window.width", defaults.windowWidth),
                     doubleValue(document, "window.height", defaults.windowHeight),
                     booleanValue(document, "kitty_graphics.enabled", defaults.kittyGraphics),
+                    stringValue(document, "scrollback.editor_command", defaults.scrollbackEditorCommand),
                     keybindings(document, defaults)
             );
         } catch (TomlException ex) {
@@ -78,6 +81,7 @@ public record AppConfig(
                 1200.0,
                 760.0,
                 true,
+                defaultScrollbackEditorCommand(),
                 Map.of(
                         "navigate_left", KeyBinding.parse("ALT+H"),
                         "navigate_down", KeyBinding.parse("ALT+J"),
@@ -87,7 +91,8 @@ public record AppConfig(
                         "new_floating", KeyBinding.parse("ALT+SHIFT+F"),
                         "next_floating", KeyBinding.parse("ALT+F12"),
                         "close_pane", KeyBinding.parse("ALT+X"),
-                        "open_font_selector", KeyBinding.parse("ALT+T")
+                        "open_font_selector", KeyBinding.parse("ALT+T"),
+                        "open_scrollback", KeyBinding.parse("ALT+S")
                 )
         );
     }
@@ -103,6 +108,7 @@ public record AppConfig(
                 windowWidth,
                 windowHeight,
                 kittyGraphics,
+                scrollbackEditorCommand,
                 keybindings
         );
     }
@@ -121,6 +127,14 @@ public record AppConfig(
 
     private static String defaultShell() {
         return "/bin/bash";
+    }
+
+    private static String defaultScrollbackEditorCommand() {
+        String editor = System.getenv("EDITOR");
+        if (editor == null || editor.isBlank()) {
+            editor = "vi";
+        }
+        return editor.trim() + " {file}";
     }
 
     private static Map<String, KeyBinding> keybindings(TomlTable table, AppConfig defaults) {
@@ -167,6 +181,8 @@ public record AppConfig(
         builder.append("height = ").append(trimDouble(windowHeight)).append("\n\n");
         builder.append("[kitty_graphics]\n");
         builder.append("enabled = ").append(kittyGraphics).append("\n\n");
+        builder.append("[scrollback]\n");
+        builder.append("editor_command = ").append(quoted(scrollbackEditorCommand)).append("\n\n");
         builder.append("[keybindings]\n");
         for (String key : KEYBINDING_KEYS) {
             KeyBinding binding = keybindings.get(key);

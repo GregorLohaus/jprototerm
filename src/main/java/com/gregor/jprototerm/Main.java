@@ -15,6 +15,10 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 public final class Main extends Application {
     private TerminalWorkspace workspace;
     private TerminalCanvasView terminalView;
@@ -79,6 +83,9 @@ public final class Main extends Application {
         } else if (config.keybindings().get("open_font_selector").matches(event)) {
             openFontSelector();
             event.consume();
+        } else if (config.keybindings().get("open_scrollback").matches(event)) {
+            openScrollbackInEditor();
+            event.consume();
         } else {
             String encoded = KeyEncoder.encode(event);
             if (encoded != null) {
@@ -141,6 +148,34 @@ public final class Main extends Application {
                     terminalView.setFont(config.fontFamily(), config.fontSize());
                     terminalView.canvas().requestFocus();
                 });
+    }
+
+    private void openScrollbackInEditor() {
+        try {
+            Path file = Files.createTempFile("jprototerm-scrollback-", ".txt");
+            Files.writeString(file, workspace.activePane().scrollbackText());
+            file.toFile().deleteOnExit();
+
+            workspace.activePane().send(scrollbackEditorCommand(file) + "\r");
+        } catch (IOException ex) {
+            System.err.println("Could not open scrollback in editor: " + ex.getMessage());
+        }
+    }
+
+    private String scrollbackEditorCommand(Path file) {
+        String quotedFile = shellQuote(file.toString());
+        String command = config.scrollbackEditorCommand();
+        if (command == null || command.isBlank()) {
+            command = "vi {file}";
+        }
+        if (command.contains("{file}")) {
+            return command.replace("{file}", quotedFile);
+        }
+        return command + " " + quotedFile;
+    }
+
+    private static String shellQuote(String value) {
+        return "'" + value.replace("'", "'\"'\"'") + "'";
     }
 
     public static void main(String[] args) {

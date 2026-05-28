@@ -115,6 +115,12 @@ public final class TerminalPane implements AutoCloseable {
         return renderSnapshot.get();
     }
 
+    public String scrollbackText() {
+        synchronized (terminal) {
+            return terminal.text();
+        }
+    }
+
     public long renderVersion() {
         return renderVersion;
     }

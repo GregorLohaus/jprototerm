@@ -53,6 +53,9 @@ height = 760
 [kitty_graphics]
 enabled = true
 
+[scrollback]
+editor_command = "vi {file}"
+
 [keybindings]
 navigate_left = "ALT+H"
 navigate_down = "ALT+J"
@@ -63,6 +66,7 @@ new_floating = "ALT+SHIFT+F"
 next_floating = "ALT+F12"
 close_pane = "ALT+X"
 open_font_selector = "ALT+T"
+open_scrollback = "ALT+S"
 ```
 
 ## Defaults
@@ -73,5 +77,6 @@ open_font_selector = "ALT+T"
 - `Alt+F12`: cycle floating panes
 - `Alt+x`: close the active floating pane
 - `Alt+t`: open the font selector
+- `Alt+s`: open the active pane scrollback in `$EDITOR`
 - Font default: `JetBrainsMono Nerd Font`
 - Kitty graphics protocol parsing is enabled by default

@@ -130,13 +130,15 @@
             preConfigure = ''
               export HOME="$TMPDIR/home"
               mkdir -p "$HOME/.gluon/substrate"
-              cp ${javafxStaticSdkZip} "$HOME/.gluon/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+              cp -f ${javafxStaticSdkZip} "$HOME/.gluon/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+              chmod u+w "$HOME/.gluon/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
             '';
 
             preBuild = ''
               export HOME="$TMPDIR/home"
               mkdir -p "$HOME/.gluon/substrate"
-              cp ${javafxStaticSdkZip} "$HOME/.gluon/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+              cp -f ${javafxStaticSdkZip} "$HOME/.gluon/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+              chmod u+w "$HOME/.gluon/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath runtimeLibs}:$LD_LIBRARY_PATH"
             '';
 

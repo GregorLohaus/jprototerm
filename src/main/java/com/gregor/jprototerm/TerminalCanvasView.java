@@ -121,13 +121,24 @@ public final class TerminalCanvasView {
         String cacheKey = paneCacheKey(pane, metrics);
         int imageWidth = Math.max(1, (int) Math.ceil(pane.width()));
         int imageHeight = Math.max(1, (int) Math.ceil(pane.height()));
-        if (cache.image == null || cache.canvas == null || cache.imageWidth != imageWidth || cache.imageHeight != imageHeight || !cacheKey.equals(cache.key)) {
+
+        // Allocate the offscreen buffers only when the pane size changes. Reallocating a
+        // full-pane Canvas + WritableImage on every content change churns ~20 MB per frame,
+        // which the native image's serial GC turns into Full-GC frame drops.
+        if (cache.canvas == null || cache.image == null || cache.imageWidth != imageWidth || cache.imageHeight != imageHeight) {
             cache.canvas = new Canvas(imageWidth, imageHeight);
-            drawPaneContent(cache.canvas.getGraphicsContext2D(), pane, font, metrics, 0.0, 0.0, imageWidth, imageHeight, true);
             cache.image = new WritableImage(imageWidth, imageHeight);
-            cache.canvas.snapshot(null, cache.image);
             cache.imageWidth = imageWidth;
             cache.imageHeight = imageHeight;
+            cache.key = null;
+        }
+
+        // Redraw and re-snapshot into the existing buffers only when content changed.
+        if (!cacheKey.equals(cache.key)) {
+            GraphicsContext cacheGc = cache.canvas.getGraphicsContext2D();
+            cacheGc.clearRect(0, 0, imageWidth, imageHeight);
+            drawPaneContent(cacheGc, pane, font, metrics, 0.0, 0.0, imageWidth, imageHeight, true);
+            cache.canvas.snapshot(null, cache.image);
             cache.key = cacheKey;
         }
 

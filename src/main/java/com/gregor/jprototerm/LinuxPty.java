@@ -16,19 +16,16 @@ import java.util.Map;
 /**
  * A Linux PTY backed by libc via the Foreign Function & Memory API.
  *
- * <p>This replaces pty4j (which loads a JNA JNI shim that does not initialise under a
- * GraalVM native image). It uses {@code posix_openpt}/{@code posix_spawnp} rather than
- * {@code fork}/{@code forkpty}: doing work between {@code fork} and {@code exec} inside a
- * multithreaded JVM is unsafe (only async-signal-safe calls are permitted), whereas
- * {@code posix_spawn} performs the dangerous part in libc with no Java on the stack.
+ * <p>This replaces pty4j (which loads a JNA JNI shim). It uses
+ * {@code posix_openpt}/{@code posix_spawnp} rather than {@code fork}/{@code forkpty}:
+ * doing work between {@code fork} and {@code exec} inside a multithreaded JVM is unsafe
+ * (only async-signal-safe calls are permitted), whereas {@code posix_spawn} performs the
+ * dangerous part in libc with no Java on the stack.
  *
  * <p>The child gets a fresh session via {@code POSIX_SPAWN_SETSID}; it then opens the slave
  * PTY itself (as fd 0, without {@code O_NOCTTY}) so the slave becomes its controlling
  * terminal. glibc applies attribute flags (the setsid) before file actions, so the open
  * happens in the new session.
- *
- * <p>FFM downcall descriptors are registered for native image by
- * {@link PtyForeignRegistrationFeature}; keep the two in sync.
  */
 public final class LinuxPty implements AutoCloseable {
     static final Linker LINKER = Linker.nativeLinker();
@@ -40,7 +37,7 @@ public final class LinuxPty implements AutoCloseable {
     static final ValueLayout.OfLong C_LONG = (ValueLayout.OfLong) LINKER.canonicalLayouts().get("long");
     static final ValueLayout.OfLong C_SIZE_T = (ValueLayout.OfLong) LINKER.canonicalLayouts().get("size_t");
 
-    // Function descriptors. Mirrored in PtyForeignRegistrationFeature.
+    // Function descriptors.
     static final FunctionDescriptor FD_INT_INT = FunctionDescriptor.of(C_INT, C_INT);
     static final FunctionDescriptor FD_PTSNAME_R = FunctionDescriptor.of(C_INT, C_INT, C_POINTER, C_SIZE_T);
     static final FunctionDescriptor FD_RW = FunctionDescriptor.of(C_LONG, C_INT, C_POINTER, C_SIZE_T);

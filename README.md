@@ -2,7 +2,15 @@
 
 JavaFX canvas terminal prototype using `jlibghostty` for terminal emulation and Nix for
 the build environment. It builds a plain JavaFX application (JDK 25, JavaFX 25 via Gradle)
-packaged as a Nix derivation — no GraalVM/GluonFX native image.
+packaged as a Nix derivation — no GraalVM/GluonFX native image. It supports tiled and
+floating panes and tabs.
+
+> [!CAUTION]
+> `nix profile add` has only been tested on **Debian with the proprietary NVIDIA driver**.
+> The runtime GL shim hardcodes Debian's `/lib/x86_64-linux-gnu` driver paths and selects
+> the NVIDIA GLX/EGL vendor, so it likely won't work yet on other distros, Wayland-only
+> setups, or Mesa/AMD/Intel GPUs. I'm happy to accept pull requests that broaden host
+> support.
 
 ## Build
 
@@ -11,7 +19,7 @@ nix build
 ./result/bin/jprototerm
 ```
 
-Install it into a profile (works on NixOS and on a plain Debian box with Nix installed):
+Install it into a profile (see the caution above on host support):
 
 ```sh
 nix profile add .
@@ -97,9 +105,12 @@ navigate_down = "ALT+J"
 navigate_up = "ALT+K"
 navigate_right = "ALT+L"
 toggle_floating = "ALT+F"
-new_floating = "ALT+SHIFT+F"
+new_pane = "ALT+N"
 next_floating = "ALT+F12"
 close_pane = "ALT+X"
+new_tab = "ALT+A"
+previous_tab = "ALT+SHIFT+H"
+next_tab = "ALT+SHIFT+L"
 open_font_selector = "ALT+T"
 open_scrollback = "ALT+S"
 ```
@@ -107,11 +118,19 @@ open_scrollback = "ALT+S"
 ## Defaults
 
 - `Alt+h/j/k/l`: navigate panes
+- `Alt+n`: new pane — a floating pane when floating panes are shown, otherwise a new tiled
+  pane (tiled panes are split equally across the width)
 - `Alt+f`: show or hide all floating panes
-- `Alt+Shift+f`: create a new floating pane
 - `Alt+F12`: cycle floating panes
-- `Alt+x`: close the active floating pane
+- `Alt+x`: close the active pane; closing a tab's last pane closes the tab, and closing the
+  last pane of the last tab quits
+- `Alt+a`: new tab
+- `Alt+Shift+h` / `Alt+Shift+l`: previous / next tab
 - `Alt+t`: open the font selector
 - `Alt+s`: open the active pane scrollback in `$EDITOR`
 - Font default: `JetBrainsMono Nerd Font`
 - Kitty graphics protocol parsing is enabled by default
+
+Each tab has its own stack of tiled and floating panes; only the active tab is rendered. A
+thin tab bar appears at the top when more than one tab is open. Closing the last tiled pane
+while floating panes exist promotes the most recently active floating pane to a tiled pane.

@@ -15,6 +15,7 @@ final class Tab implements AutoCloseable {
     private final List<TerminalPane> panes = new ArrayList<>();
     private int activeIndex;
     private int hiddenFloatingFocusIndex = -1;
+    private TerminalPane lastFocusedFloating;
 
     Tab(AppConfig config) {
         this.config = config;
@@ -54,13 +55,14 @@ final class Tab implements AutoCloseable {
     boolean focus(TerminalPane pane) {
         int index = panes.indexOf(pane);
         if (index >= 0 && pane.visible() && activeIndex != index) {
-            activeIndex = index;
+            setActive(index);
             return true;
         }
         return false;
     }
 
-    void layout(double width, double height) {
+    void layout(double width, double height, double topInset) {
+        double availHeight = height - topInset;
         List<TerminalPane> tiled = panes.stream()
                 .filter(TerminalPane::visible)
                 .filter(pane -> !pane.floating())
@@ -68,7 +70,7 @@ final class Tab implements AutoCloseable {
         int tileCount = Math.max(1, tiled.size());
         double tileWidth = width / tileCount;
         for (int i = 0; i < tiled.size(); i++) {
-            tiled.get(i).bounds(i * tileWidth, 0, tileWidth, height);
+            tiled.get(i).bounds(i * tileWidth, topInset, tileWidth, availHeight);
         }
 
         List<TerminalPane> floating = panes.stream()
@@ -77,17 +79,15 @@ final class Tab implements AutoCloseable {
                 .toList();
         for (int i = 0; i < floating.size(); i++) {
             TerminalPane pane = floating.get(i);
-            if (pane.visible() && pane.floating()) {
-                double floatingWidth = Math.max(420, width * 0.58);
-                double floatingHeight = Math.max(260, height * 0.58);
-                double offset = i * 28.0;
-                pane.bounds(
-                        Math.min(width - floatingWidth - 12.0, ((width - floatingWidth) / 2.0) + offset),
-                        Math.min(height - floatingHeight - 12.0, ((height - floatingHeight) / 2.0) + offset),
-                        floatingWidth,
-                        floatingHeight
-                );
-            }
+            double floatingWidth = Math.max(420, width * 0.58);
+            double floatingHeight = Math.max(260, availHeight * 0.58);
+            double offset = i * 28.0;
+            pane.bounds(
+                    Math.min(width - floatingWidth - 12.0, ((width - floatingWidth) / 2.0) + offset),
+                    Math.min(height - floatingHeight - 12.0, topInset + ((availHeight - floatingHeight) / 2.0) + offset),
+                    floatingWidth,
+                    floatingHeight
+            );
         }
     }
 
@@ -104,7 +104,7 @@ final class Tab implements AutoCloseable {
                 .min(Comparator.comparingDouble(pane -> distance(current, pane)))
                 .orElse(null);
         if (target != null) {
-            activeIndex = panes.indexOf(target);
+            setActive(panes.indexOf(target));
             return true;
         }
         return false;
@@ -124,10 +124,10 @@ final class Tab implements AutoCloseable {
             TerminalPane active = activePane();
             hiddenFloatingFocusIndex = active.floating() ? activeIndex : firstVisibleFloatingIndex();
             floating.forEach(pane -> pane.setVisible(false));
-            activeIndex = firstVisibleNonFloatingIndex();
+            setActive(firstVisibleNonFloatingIndex());
         } else {
             floating.forEach(pane -> pane.setVisible(true));
-            activeIndex = visibleIndexOrFallback(hiddenFloatingFocusIndex, panes.indexOf(floating.get(floating.size() - 1)));
+            setActive(visibleIndexOrFallback(hiddenFloatingFocusIndex, panes.indexOf(floating.get(floating.size() - 1))));
             hiddenFloatingFocusIndex = -1;
         }
     }
@@ -142,14 +142,14 @@ final class Tab implements AutoCloseable {
         } else {
             TerminalPane pane = openPane(false);
             panes.add(pane);
-            activeIndex = panes.size() - 1;
+            setActive(panes.size() - 1);
         }
     }
 
     void nextFloatingPane() {
         TerminalPane next = nextFloatingAfter(activeIndex);
         next.setVisible(true);
-        activeIndex = panes.indexOf(next);
+        setActive(panes.indexOf(next));
     }
 
     void closeActivePane() {
@@ -157,6 +157,9 @@ final class Tab implements AutoCloseable {
         int removed = activeIndex;
         int previous = previousVisibleIndex(removed);
         panes.remove(removed);
+        if (active == lastFocusedFloating) {
+            lastFocusedFloating = null;
+        }
         active.close();
         if (panes.isEmpty()) {
             activeIndex = 0;
@@ -164,17 +167,38 @@ final class Tab implements AutoCloseable {
         }
         activeIndex = adjustIndexAfterRemoval(previous, removed);
         hiddenFloatingFocusIndex = adjustHiddenFocusAfterRemoval(hiddenFloatingFocusIndex, removed);
-        // If only hidden panes remained (e.g. closed the last tiled pane while floating
-        // panes were stashed), reveal the one we're focusing so the screen isn't blank.
+
+        // If the last tiled (main) pane was closed, promote a floating pane to be the new
+        // main pane so the layout has a base and rendering continues normally. Prefer the
+        // most recently focused floating pane.
+        if (panes.stream().noneMatch(pane -> !pane.floating())) {
+            TerminalPane promote = (lastFocusedFloating != null && panes.contains(lastFocusedFloating))
+                    ? lastFocusedFloating
+                    : panes.get(activeIndex);
+            promote.setFloating(false);
+            promote.setVisible(true);
+            activeIndex = panes.indexOf(promote);
+            lastFocusedFloating = null;
+        }
+
+        // If only hidden panes remained, reveal the one we're focusing so the screen isn't
+        // blank.
         if (!panes.get(activeIndex).visible()) {
             panes.get(activeIndex).setVisible(true);
+        }
+    }
+
+    private void setActive(int index) {
+        activeIndex = index;
+        if (index >= 0 && index < panes.size() && panes.get(index).floating()) {
+            lastFocusedFloating = panes.get(index);
         }
     }
 
     private void createFloatingPane() {
         TerminalPane pane = openPane(true);
         panes.add(pane);
-        activeIndex = panes.size() - 1;
+        setActive(panes.size() - 1);
     }
 
     private boolean anyFloatingVisible() {
@@ -225,7 +249,7 @@ final class Tab implements AutoCloseable {
             return false;
         }
 
-        activeIndex = panes.indexOf(floating.get(next));
+        setActive(panes.indexOf(floating.get(next)));
         return true;
     }
 

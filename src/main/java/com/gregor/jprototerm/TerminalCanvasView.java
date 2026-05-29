@@ -16,6 +16,7 @@ import dev.jlibghostty.RenderColor;
 import dev.jlibghostty.RenderCursorStyle;
 import dev.jlibghostty.RenderRow;
 import dev.jlibghostty.RenderStateSnapshot;
+import javafx.geometry.VPos;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.image.Image;
@@ -29,6 +30,7 @@ import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontSmoothingType;
 import javafx.scene.text.Text;
+import javafx.scene.text.TextAlignment;
 
 import java.io.ByteArrayInputStream;
 import java.util.HashMap;
@@ -98,6 +100,9 @@ public final class TerminalCanvasView {
     private static final int DIRTY_PARTIAL = 1;
     private static final int DIRTY_FULL = 2;
 
+    // Thin tab strip shown at the top when more than one tab is open.
+    private static final double TAB_BAR_HEIGHT = 22.0;
+
     public void render() {
         double width = canvas.getWidth();
         double height = canvas.getHeight();
@@ -121,7 +126,8 @@ public final class TerminalCanvasView {
         lastWorkspaceVersion = workspaceVersion;
         lastRenderTick = renderTick;
 
-        workspace.layout(width, height);
+        double topInset = workspace.tabCount() > 1 ? TAB_BAR_HEIGHT : 0.0;
+        workspace.layout(width, height, topInset);
         Font font = currentFont();
         FontMetrics metrics = currentFontMetrics();
         List<TerminalPane> panes = workspace.panes();
@@ -141,6 +147,9 @@ public final class TerminalCanvasView {
             paneContentVersion.keySet().retainAll(panes);
             gc.setFill(GAP_BACKGROUND);
             gc.fillRect(0, 0, width, height);
+            if (topInset > 0.0) {
+                drawTabBar(gc, width, topInset);
+            }
             for (TerminalPane pane : panes) {
                 paintPane(gc, pane, font, metrics, pane.renderSnapshotFull());
                 paneContentVersion.put(pane, pane.renderVersion());
@@ -249,6 +258,34 @@ public final class TerminalCanvasView {
         gc.clip();
     }
 
+    // Thin tab strip: one equal-width segment per tab, the current one highlighted, with a
+    // small 1-based number centred in each segment.
+    private void drawTabBar(GraphicsContext gc, double width, double barHeight) {
+        int count = workspace.tabCount();
+        int currentIndex = workspace.currentTabIndex();
+        Font barFont = Font.font(fontFamily, Math.max(9.0, Math.min(13.0, barHeight * 0.62)));
+        gc.setFont(barFont);
+        gc.setFontSmoothingType(FontSmoothingType.GRAY);
+        gc.setTextAlign(TextAlignment.CENTER);
+        gc.setTextBaseline(VPos.CENTER);
+
+        double gap = 1.0;
+        double segmentWidth = width / count;
+        for (int i = 0; i < count; i++) {
+            double x = i * segmentWidth;
+            boolean current = i == currentIndex;
+            gc.setFill(current ? Color.rgb(45, 55, 72) : Color.rgb(22, 24, 28));
+            gc.fillRect(x, 0.0, segmentWidth - gap, barHeight);
+            gc.setFill(current ? DEFAULT_FOREGROUND : Color.rgb(128, 136, 148));
+            gc.fillText(Integer.toString(i + 1), x + (segmentWidth - gap) / 2.0, barHeight / 2.0);
+        }
+
+        // Restore the defaults the cell renderer relies on (left-aligned, baseline, LCD).
+        gc.setTextAlign(TextAlignment.LEFT);
+        gc.setTextBaseline(VPos.BASELINE);
+        gc.setFontSmoothingType(FontSmoothingType.LCD);
+    }
+
     // Full content render: background, border, all rows, cursor, and (when enabled) kitty
     // graphics. Used by the kitty direct path and by full offscreen redraws.
     private void drawPaneContent(
@@ -264,12 +301,8 @@ public final class TerminalCanvasView {
             boolean withKitty
     ) {
         gc.setFontSmoothingType(FontSmoothingType.LCD);
-        // Paint content fully opaque. LCD subpixel text rendering produces colour fringing
-        // on a translucent surface, so floating-pane translucency is applied by the caller
-        // when the finished (opaque) buffer is composited onto the canvas.
-        gc.setFill(Color.rgb(9, 10, 12));
+        gc.setFill(PANE_BACKGROUND);
         gc.fillRect(x, y, width, height);
-        drawBorder(gc, pane, x, y, width, height);
         gc.setFont(font);
 
         double left = x + 12.0;
@@ -285,7 +318,12 @@ public final class TerminalCanvasView {
         }
 
         if (snapshot != null) {
+            double contentBottom = top + snapshot.rows() * metrics.lineHeight;
+            fillVerticalPadding(gc, snapshot, x, y, width, height, top, contentBottom);
             for (RenderRow row : snapshot.renderRows()) {
+                double y0 = Math.floor(top + (row.row() * metrics.lineHeight));
+                double y1 = Math.ceil(top + ((row.row() + 1) * metrics.lineHeight));
+                paintSidePadding(gc, row, x, width, left, metrics.cellWidth, y0, y1 - y0);
                 drawRow(gc, row, left, top, baseline, metrics.cellWidth, metrics.lineHeight);
             }
             drawCursor(gc, snapshot, left, top, metrics.cellWidth, metrics.lineHeight);
@@ -294,6 +332,55 @@ public final class TerminalCanvasView {
         if (withKitty) {
             drawKittyGraphics(gc, pane, KittyPlacementLayer.ABOVE_TEXT, placeholderBounds, left, top, metrics.cellWidth, metrics.lineHeight);
         }
+
+        drawBorder(gc, pane, x, y, width, height);
+    }
+
+    // Effective background colour of a cell as it is drawn (reverse video swaps fg/bg, an
+    // unset colour falls back to the defaults).
+    private static Color cellBackgroundColor(RenderCell cell) {
+        if (cell.inverse()) {
+            var fg = cell.foreground();
+            return fg.isPresent() ? toFxColor(fg.get()) : DEFAULT_FOREGROUND;
+        }
+        var bg = cell.background();
+        return bg.isPresent() ? toFxColor(bg.get()) : PANE_BACKGROUND;
+    }
+
+    private static Color rowEdgeBackground(RenderRow row, boolean firstCell) {
+        List<RenderCell> cells = row.cells();
+        if (cells.isEmpty()) {
+            return PANE_BACKGROUND;
+        }
+        return cellBackgroundColor(firstCell ? cells.get(0) : cells.get(cells.size() - 1));
+    }
+
+    // Extend the row's edge-cell backgrounds into the left/right padding (the 12px margin and
+    // the right-edge rounding sliver), so the unused space matches the rendered content.
+    private void paintSidePadding(GraphicsContext gc, RenderRow row, double paneX, double paneWidth,
+            double contentLeft, double cellWidth, double yTop, double bandHeight) {
+        int columns = row.cells().size();
+        if (columns == 0) {
+            return;
+        }
+        double contentRight = contentLeft + (columns * cellWidth);
+        gc.setFill(rowEdgeBackground(row, true));
+        gc.fillRect(paneX, yTop, contentLeft - paneX, bandHeight);
+        gc.setFill(rowEdgeBackground(row, false));
+        gc.fillRect(contentRight, yTop, paneX + paneWidth - contentRight, bandHeight);
+    }
+
+    // Fill the top/bottom padding strips with the top/bottom row's edge colour.
+    private void fillVerticalPadding(GraphicsContext gc, RenderStateSnapshot snapshot,
+            double paneX, double paneY, double paneWidth, double paneHeight, double contentTop, double contentBottom) {
+        List<RenderRow> rows = snapshot.renderRows();
+        if (rows.isEmpty()) {
+            return;
+        }
+        gc.setFill(rowEdgeBackground(rows.get(0), true));
+        gc.fillRect(paneX, paneY, paneWidth, contentTop - paneY);
+        gc.setFill(rowEdgeBackground(rows.get(rows.size() - 1), true));
+        gc.fillRect(paneX, contentBottom, paneWidth, paneY + paneHeight - contentBottom);
     }
 
     // Incremental render: repaint only the rows ghostty flagged dirty, at the pane's screen
@@ -316,6 +403,8 @@ public final class TerminalCanvasView {
         double top = py + 12.0;
         double baseline = top + metrics.baselineOffset;
 
+        double contentBottom = top + snapshot.rows() * metrics.lineHeight;
+        int lastRow = snapshot.rows() - 1;
         boolean cursorRowDirty = false;
         double bandMin = Double.POSITIVE_INFINITY;
         double bandMax = Double.NEGATIVE_INFINITY;
@@ -329,9 +418,22 @@ public final class TerminalCanvasView {
             double y1 = Math.ceil(top + ((row.row() + 1) * metrics.lineHeight));
             gc.setFill(PANE_BACKGROUND);
             gc.fillRect(px, y0, pw, y1 - y0);
+            paintSidePadding(gc, row, px, pw, left, metrics.cellWidth, y0, y1 - y0);
             drawRow(gc, row, left, top, baseline, metrics.cellWidth, metrics.lineHeight);
             bandMin = Math.min(bandMin, y0);
             bandMax = Math.max(bandMax, y1);
+            // Edge rows also own the top/bottom padding strip; repaint it and extend the
+            // band so panes stacked above get restored over it too.
+            if (row.row() == 0) {
+                gc.setFill(rowEdgeBackground(row, true));
+                gc.fillRect(px, py, pw, top - py);
+                bandMin = Math.min(bandMin, py);
+            }
+            if (row.row() == lastRow) {
+                gc.setFill(rowEdgeBackground(row, true));
+                gc.fillRect(px, contentBottom, pw, py + ph - contentBottom);
+                bandMax = Math.max(bandMax, py + ph);
+            }
             if (snapshot.cursorViewportHasValue() && row.row() == snapshot.cursorViewportY()) {
                 cursorRowDirty = true;
             }

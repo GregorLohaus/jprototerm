@@ -43,10 +43,18 @@ public final class TerminalWorkspace implements AutoCloseable {
         return !tabs.isEmpty() && current().isActive(pane);
     }
 
-    public void layout(double width, double height) {
+    public void layout(double width, double height, double topInset) {
         if (!tabs.isEmpty()) {
-            current().layout(width, height);
+            current().layout(width, height, topInset);
         }
+    }
+
+    public int tabCount() {
+        return tabs.size();
+    }
+
+    public int currentTabIndex() {
+        return currentTab;
     }
 
     public void focus(TerminalPane pane) {

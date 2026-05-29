@@ -29,6 +29,7 @@ gluonfx {
             '-H:+UnlockExperimentalVMOptions',
             '-H:+ForeignAPISupport',
             '--enable-native-access=ALL-UNNAMED',
+            '-H:IncludeResources=com/sun/jna/.*|com/pty4j/native/.*|pty4j-native/.*',
             "-H:ConfigurationFileDirectories=${file('src/main/resources/META-INF/native-image/com.gregor/jprototerm').absolutePath}".toString()
     ]
 }

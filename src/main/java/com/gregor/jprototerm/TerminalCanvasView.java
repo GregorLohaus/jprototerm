@@ -148,7 +148,7 @@ public final class TerminalCanvasView {
                 drawTabBar(gc, width, topInset);
             }
             for (TerminalPane pane : panes) {
-                paintPane(gc, pane, font, metrics, pane.renderSnapshotFull());
+                paintPane(gc, pane, font, metrics, pane.renderSnapshot());
                 paneContentVersion.put(pane, pane.renderVersion());
             }
             return;

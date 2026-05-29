@@ -108,6 +108,7 @@
               done
 
               makeWrapper "${pkgs.jdk25}/bin/java" "$out/bin/jprototerm" \
+                --run 'export JPROTOTERM_HOST_LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:-}"' \
                 --add-flags "--enable-native-access=ALL-UNNAMED,javafx.graphics" \
                 --add-flags "--module-path $out/share/jprototerm/javafx" \
                 --add-flags "--add-modules javafx.controls,javafx.fxml" \

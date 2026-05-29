@@ -35,16 +35,27 @@ final class Tab implements AutoCloseable {
             return List.of();
         }
         List<TerminalPane> visible = panes.stream().filter(TerminalPane::visible).toList();
-        TerminalPane active = activePane();
-        if (!active.visible() || !active.floating()) {
-            return visible;
+        if (visible.isEmpty()) {
+            return List.of();
         }
-
+        // Draw order = z-order: all tiled panes first (they never overlap), then floating
+        // panes on top, with the active floating pane last (topmost). This holds regardless
+        // of creation order, so a tiled pane created after a floating one still sits behind.
+        TerminalPane active = activePane();
         List<TerminalPane> ordered = new ArrayList<>(visible.size());
-        visible.stream()
-                .filter(pane -> pane != active)
-                .forEach(ordered::add);
-        ordered.add(active);
+        for (TerminalPane pane : visible) {
+            if (!pane.floating()) {
+                ordered.add(pane);
+            }
+        }
+        for (TerminalPane pane : visible) {
+            if (pane.floating() && pane != active) {
+                ordered.add(pane);
+            }
+        }
+        if (active.visible() && active.floating()) {
+            ordered.add(active);
+        }
         return List.copyOf(ordered);
     }
 
@@ -155,7 +166,12 @@ final class Tab implements AutoCloseable {
     void closeActivePane() {
         TerminalPane active = activePane();
         int removed = activeIndex;
-        int previous = previousVisibleIndex(removed);
+        // When closing a floating pane, focus the next visible floating pane if there is one
+        // (don't jump to a tiled pane); otherwise fall back to the nearest visible pane.
+        int target = active.floating() ? nearestVisibleFloatingIndex(removed) : -1;
+        if (target < 0) {
+            target = previousVisibleIndex(removed);
+        }
         panes.remove(removed);
         if (active == lastFocusedFloating) {
             lastFocusedFloating = null;
@@ -165,7 +181,7 @@ final class Tab implements AutoCloseable {
             activeIndex = 0;
             return;
         }
-        activeIndex = adjustIndexAfterRemoval(previous, removed);
+        activeIndex = adjustIndexAfterRemoval(target, removed);
         hiddenFloatingFocusIndex = adjustHiddenFocusAfterRemoval(hiddenFloatingFocusIndex, removed);
 
         // If the last tiled (main) pane was closed, promote a floating pane to be the new
@@ -271,6 +287,20 @@ final class Tab implements AutoCloseable {
             }
         }
         return 0;
+    }
+
+    private int nearestVisibleFloatingIndex(int index) {
+        for (int i = index + 1; i < panes.size(); i++) {
+            if (panes.get(i).visible() && panes.get(i).floating()) {
+                return i;
+            }
+        }
+        for (int i = index - 1; i >= 0; i--) {
+            if (panes.get(i).visible() && panes.get(i).floating()) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private int previousVisibleIndex(int index) {

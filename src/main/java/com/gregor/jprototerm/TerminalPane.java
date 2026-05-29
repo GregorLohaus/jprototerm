@@ -29,7 +29,7 @@ public final class TerminalPane implements AutoCloseable {
     private final MouseEncoder mouseEncoder = new MouseEncoder();
     // A persistent render state (reused across frames) is what makes ghostty's per-row
     // dirty tracking meaningful: update() accumulates dirty since the last resetDirty().
-    private final RenderState renderState = new RenderState();
+    private RenderState renderState = new RenderState();
     private RenderStateSnapshot cachedSnapshot;
     private ShellSession session;
     private boolean floating;
@@ -42,8 +42,12 @@ public final class TerminalPane implements AutoCloseable {
     private int rows;
     private int pixelWidth;
     private int pixelHeight;
-    private long renderVersion;
+    // Bumped on the reader thread (terminal writes) and read on the FX thread (render loop),
+    // so it must be volatile.
+    private volatile long renderVersion;
     private long snapshotVersion = -1;
+    private volatile boolean closed;
+    private boolean needsFullRender;
 
     private TerminalPane(Terminal terminal, int columns, int rows) {
         this.terminal = terminal;
@@ -61,6 +65,9 @@ public final class TerminalPane implements AutoCloseable {
 
     public void write(String text) {
         synchronized (terminal) {
+            if (closed) {
+                return;
+            }
             terminal.write(text);
             refresh();
         }
@@ -68,6 +75,9 @@ public final class TerminalPane implements AutoCloseable {
 
     public void write(byte[] bytes) {
         synchronized (terminal) {
+            if (closed) {
+                return;
+            }
             terminal.write(bytes);
             refresh();
         }
@@ -231,8 +241,25 @@ public final class TerminalPane implements AutoCloseable {
             this.rows = rows;
             this.pixelWidth = pixelWidth;
             this.pixelHeight = pixelHeight;
+            // A persistent render state gets corrupted by a terminal resize: its next snapshot
+            // comes back blank (a throwaway render state, as ghostty's API was originally used,
+            // never had this). Recreate it so the next snapshot is a clean full render of the
+            // resized grid, even for an idle pane that won't redraw on its own.
+            renderState.close();
+            renderState = new RenderState();
+            snapshotVersion = -1;
+            // The app (e.g. a TUI) also redraws a moment later via SIGWINCH; force the next
+            // content repaint to use a full snapshot so we don't rely on dirty across the resize.
+            needsFullRender = true;
             refresh();
         }
+    }
+
+    /** Returns and clears the "force a full repaint" flag set by {@link #resize}. */
+    public boolean consumeFullRender() {
+        boolean pending = needsFullRender;
+        needsFullRender = false;
+        return pending;
     }
 
     private void refresh() {
@@ -244,12 +271,19 @@ public final class TerminalPane implements AutoCloseable {
 
     @Override
     public void close() {
+        // Stop accepting reader-thread writes first, then shut the session (which unblocks
+        // and ends the reader), so terminal.close() can't race a write from that thread.
+        synchronized (terminal) {
+            closed = true;
+        }
         if (session != null) {
             session.close();
             session = null;
         }
         mouseEncoder.close();
         renderState.close();
-        terminal.close();
+        synchronized (terminal) {
+            terminal.close();
+        }
     }
 }

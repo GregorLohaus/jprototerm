@@ -1,7 +1,5 @@
 package com.gregor.jprototerm;
 
-import javafx.application.Platform;
-
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
@@ -94,23 +92,25 @@ public final class ShellSession implements AutoCloseable {
     }
 
     private void readOutput(TerminalPane pane) {
-        byte[] buffer = new byte[8192];
+        byte[] buffer = new byte[65536];
         try {
             int read;
             while ((read = pty.read(buffer)) != -1) {
-                if (!closed) {
-                    byte[] bytes = new byte[read];
-                    System.arraycopy(buffer, 0, bytes, 0, read);
-                    Platform.runLater(() -> {
-                        if (!closed) {
-                            pane.write(bytes);
-                        }
-                    });
+                if (closed) {
+                    break;
                 }
+                byte[] bytes = new byte[read];
+                System.arraycopy(buffer, 0, bytes, 0, read);
+                // Feed the terminal model straight from the reader thread. terminal access is
+                // guarded by the per-terminal lock, and the render loop picks the change up on
+                // the next pulse. Avoiding a Platform.runLater hop per chunk removes a frame of
+                // latency and stops write tasks from contending with rendering on the FX thread
+                // when a TUI repaints heavily (the input-lag culprit).
+                pane.write(bytes);
             }
         } catch (RuntimeException ex) {
             if (!closed) {
-                Platform.runLater(() -> pane.write("\r\nshell output stopped: " + ex.getMessage() + "\r\n"));
+                pane.write("\r\nshell output stopped: " + ex.getMessage() + "\r\n");
             }
         }
     }

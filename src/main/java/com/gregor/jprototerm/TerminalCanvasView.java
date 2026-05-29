@@ -54,6 +54,9 @@ public final class TerminalCanvasView {
     // Last content version drawn to the canvas per pane, so a content frame repaints only
     // the panes that actually changed.
     private final Map<TerminalPane, Long> paneContentVersion = new HashMap<>();
+    // Pane list from the last layout pass; reused on content-only frames so typing doesn't
+    // re-run layout()/panes()/resize each frame.
+    private List<TerminalPane> cachedPanes = List.of();
     private String fontFamily;
     private double fontSize;
     private Font cachedFont;
@@ -126,24 +129,21 @@ public final class TerminalCanvasView {
         lastWorkspaceVersion = workspaceVersion;
         lastRenderTick = renderTick;
 
-        double topInset = workspace.tabCount() > 1 ? TAB_BAR_HEIGHT : 0.0;
-        workspace.layout(width, height, topInset);
         Font font = currentFont();
         FontMetrics metrics = currentFontMetrics();
-        List<TerminalPane> panes = workspace.panes();
-
-        // Apply terminal resizes up front so snapshots reflect current geometry (a no-op
-        // when the grid is unchanged).
-        for (TerminalPane pane : panes) {
-            applyResize(pane, metrics);
-        }
-
         GraphicsContext gc = canvas.getGraphicsContext2D();
         gc.setFontSmoothingType(FontSmoothingType.LCD);
 
         if (layoutChanged) {
-            // Recomposite everything onto the retained canvas: clear, then paint panes
-            // bottom-to-top (workspace.panes() puts the active floating pane last == on top).
+            // Geometry/pane-set changed: relayout, resize terminals, and recomposite the
+            // whole canvas, painting panes bottom-to-top (active floating pane last == top).
+            double topInset = workspace.tabCount() > 1 ? TAB_BAR_HEIGHT : 0.0;
+            workspace.layout(width, height, topInset);
+            List<TerminalPane> panes = workspace.panes();
+            for (TerminalPane pane : panes) {
+                applyResize(pane, metrics);
+            }
+            cachedPanes = panes;
             paneContentVersion.keySet().retainAll(panes);
             gc.setFill(GAP_BACKGROUND);
             gc.fillRect(0, 0, width, height);
@@ -157,8 +157,9 @@ public final class TerminalCanvasView {
             return;
         }
 
-        // Content-only frame: repaint just the panes whose content changed, directly on the
-        // retained canvas, then restore any panes stacked above where they overlap.
+        // Content-only frame: geometry is unchanged, so skip layout/panes/resize entirely and
+        // reuse the cached pane list — repaint just the panes whose content changed.
+        List<TerminalPane> panes = cachedPanes;
         for (int i = 0; i < panes.size(); i++) {
             TerminalPane pane = panes.get(i);
             Long drawn = paneContentVersion.get(pane);
@@ -197,12 +198,16 @@ public final class TerminalCanvasView {
         double ph = pane.height();
         boolean kitty = config.kittyGraphics() && paneHasKittyGraphics(pane);
 
+        // A pane just resized (e.g. from a split) can't be trusted to report its dirty rows
+        // for the app's post-SIGWINCH redraw, so force a full snapshot once.
+        boolean forceFull = pane.consumeFullRender();
+
         double regionY0;
         double regionY1;
         gc.save();
         clipRect(gc, px, py, pw, ph);
-        if (kitty) {
-            drawPaneContent(gc, pane, font, metrics, pane.renderSnapshotFull(), px, py, pw, ph, true);
+        if (kitty || forceFull) {
+            drawPaneContent(gc, pane, font, metrics, pane.renderSnapshotFull(), px, py, pw, ph, kitty);
             regionY0 = py;
             regionY1 = py + ph;
         } else {

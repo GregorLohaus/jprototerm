@@ -1,0 +1,236 @@
+{
+  "resources": [
+    {
+      "glob": "dev/jlibghostty/native/**"
+    }
+  ],
+  "foreign": {
+    "upcalls": [
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "void*",
+          "void*",
+          "size_t"
+        ]
+      },
+      {
+        "returnType": "bool",
+        "parameterTypes": [
+          "void*",
+          "void*",
+          "void*"
+        ]
+      }
+    ],
+    "downcalls": [
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "void*",
+          "void*",
+          "struct(short, short, padding(4), size_t)"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*"
+        ]
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "void*",
+          "short",
+          "short",
+          "int",
+          "int"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "void*",
+          "size_t"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "struct(int, padding(4), struct(long long, long long))"
+        ]
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "void*",
+          "int",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "void*",
+          "int",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "bool",
+        "parameterTypes": [
+          "void*",
+          "size_t"
+        ]
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "void*",
+          "size_t",
+          "bool",
+          "void*",
+          "size_t",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "int",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void*",
+        "parameterTypes": []
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "int",
+          "void*",
+          "size_t",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "int",
+          "int",
+          "void*",
+          "size_t",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "int",
+          "struct(short, short, int, int)",
+          "void*",
+          "size_t",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "void*",
+          "void*",
+          "void*",
+          "struct(size_t, int, bool, bool, padding(2), struct(size_t, bool, bool, bool, bool, bool, bool, padding(2), struct(size_t, bool, bool, bool, bool, bool, bool, padding(2))), void*)"
+        ]
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "void*",
+          "void*",
+          "size_t",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void*",
+        "parameterTypes": [
+          "void*",
+          "int"
+        ]
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "void*",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "bool",
+        "parameterTypes": [
+          "void*"
+        ]
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "void*",
+          "void*",
+          "void*",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "int"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "short"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "struct(float, float)"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "int",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "int",
+        "parameterTypes": [
+          "void*",
+          "void*",
+          "void*",
+          "size_t",
+          "void*"
+        ]
+      }
+    ]
+  }
+}

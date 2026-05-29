@@ -191,9 +191,10 @@
               mkdir -p /tmp/nix
               ln -sfn ${pkgs.pkg-config}/bin/pkg-config /tmp/nix/pkg-config
               for gluonHome in "$HOME/.gluon" /build/.gluon; do
-                mkdir -p "$gluonHome/substrate"
-                cp -f ${javafxStaticSdkZip} "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
-                chmod u+w "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+                if mkdir -p "$gluonHome/substrate" 2>/dev/null; then
+                  cp -f ${javafxStaticSdkZip} "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+                  chmod u+w "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+                fi
               done
             '';
 
@@ -203,9 +204,10 @@
               mkdir -p /tmp/nix
               ln -sfn ${pkgs.pkg-config}/bin/pkg-config /tmp/nix/pkg-config
               for gluonHome in "$HOME/.gluon" /build/.gluon; do
-                mkdir -p "$gluonHome/substrate"
-                cp -f ${javafxStaticSdkZip} "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
-                chmod u+w "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+                if mkdir -p "$gluonHome/substrate" 2>/dev/null; then
+                  cp -f ${javafxStaticSdkZip} "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+                  chmod u+w "$gluonHome/substrate/openjfx-21-ea+11.3-linux-x86_64-static.zip"
+                fi
               done
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath runtimeLibs}:$LD_LIBRARY_PATH"
             '';

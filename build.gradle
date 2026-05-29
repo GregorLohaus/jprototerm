@@ -29,7 +29,7 @@ gluonfx {
             '-H:+UnlockExperimentalVMOptions',
             '-H:+ForeignAPISupport',
             '--enable-native-access=ALL-UNNAMED',
-            "-H:ConfigurationFileDirectories=${file('src/main/resources/META-INF/native-image/dev.jlibghostty/jlibghostty').absolutePath}".toString()
+            "-H:ConfigurationFileDirectories=${file('src/main/resources/META-INF/native-image/com.gregor/jprototerm').absolutePath}".toString()
     ]
 }
 

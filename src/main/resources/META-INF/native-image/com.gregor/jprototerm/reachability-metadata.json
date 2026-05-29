@@ -1,0 +1,13 @@
+{
+  "resources": [
+    {
+      "glob": "com/sun/jna/**"
+    },
+    {
+      "glob": "com/pty4j/native/**"
+    },
+    {
+      "glob": "pty4j-native/**"
+    }
+  ]
+}

@@ -1,15 +1,5 @@
 {
   "resources": {
-    "includes": [
-      {
-        "pattern": "com/sun/jna/.*"
-      },
-      {
-        "pattern": "com/pty4j/native/.*"
-      },
-      {
-        "pattern": "pty4j-native/.*"
-      }
-    ]
+    "includes": []
   }
 }

@@ -16,7 +16,6 @@ repositories {
 dependencies {
     implementation 'io.github.wasabithumb:jtoml:1.5.2'
     implementation 'dev.jlibghostty:jlibghostty:0.1.0-SNAPSHOT'
-    implementation 'org.jetbrains.pty4j:pty4j:0.13.11'
 }
 
 javafx {
@@ -26,10 +25,10 @@ javafx {
 
 gluonfx {
     compilerArgs += [
+            '--features=com.gregor.jprototerm.PtyForeignRegistrationFeature',
             '-H:+UnlockExperimentalVMOptions',
             '-H:+ForeignAPISupport',
             '--enable-native-access=ALL-UNNAMED',
-            '-H:IncludeResources=com/sun/jna/.*|com/pty4j/native/.*|pty4j-native/.*',
             "-H:ConfigurationFileDirectories=${file('src/main/resources/META-INF/native-image/com.gregor/jprototerm').absolutePath}".toString()
     ]
 }

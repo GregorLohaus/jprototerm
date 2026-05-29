@@ -1,12 +1,7 @@
 package com.gregor.jprototerm;
 
-import com.pty4j.PtyProcess;
-import com.pty4j.PtyProcessBuilder;
-import com.pty4j.WinSize;
 import javafx.application.Platform;
 
-import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
@@ -14,14 +9,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class ShellSession implements AutoCloseable {
-    private final PtyProcess process;
-    private final OutputStream stdin;
+    private final LinuxPty pty;
     private final ExecutorService reader;
     private volatile boolean closed;
 
-    private ShellSession(PtyProcess process) {
-        this.process = process;
-        this.stdin = process.getOutputStream();
+    private ShellSession(LinuxPty pty) {
+        this.pty = pty;
         this.reader = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "shell-output-reader");
             thread.setDaemon(true);
@@ -36,14 +29,14 @@ public final class ShellSession implements AutoCloseable {
             environment.put("COLORTERM", "truecolor");
             environment.putAll(envOverride);
 
-            PtyProcess process = new PtyProcessBuilder(new String[] {shell, "-i"})
-                    .setEnvironment(environment)
-                    .setInitialColumns(columns)
-                    .setInitialRows(rows)
-                    .setDirectory(System.getProperty("user.home"))
-                    .start();
-            return new ShellSession(process);
-        } catch (IOException ex) {
+            LinuxPty pty = LinuxPty.spawn(
+                    new String[] {shell, "-i"},
+                    environment,
+                    System.getProperty("user.home"));
+            ShellSession session = new ShellSession(pty);
+            session.resize(columns, rows);
+            return session;
+        } catch (RuntimeException ex) {
             pane.write("failed to start shell: " + ex.getMessage() + "\r\n");
             throw new IllegalStateException("Could not start shell " + shell, ex);
         }
@@ -57,7 +50,7 @@ public final class ShellSession implements AutoCloseable {
         if (closed) {
             return;
         }
-        process.setWinSize(new WinSize(columns, rows));
+        pty.setWinSize(columns, rows);
     }
 
     public void send(String text) {
@@ -69,9 +62,8 @@ public final class ShellSession implements AutoCloseable {
             return;
         }
         try {
-            stdin.write(bytes);
-            stdin.flush();
-        } catch (IOException ex) {
+            pty.write(bytes);
+        } catch (RuntimeException ex) {
             close();
         }
     }
@@ -80,7 +72,7 @@ public final class ShellSession implements AutoCloseable {
         byte[] buffer = new byte[8192];
         try {
             int read;
-            while ((read = process.getInputStream().read(buffer)) != -1) {
+            while ((read = pty.read(buffer)) != -1) {
                 if (!closed) {
                     byte[] bytes = new byte[read];
                     System.arraycopy(buffer, 0, bytes, 0, read);
@@ -91,7 +83,7 @@ public final class ShellSession implements AutoCloseable {
                     });
                 }
             }
-        } catch (IOException ex) {
+        } catch (RuntimeException ex) {
             if (!closed) {
                 Platform.runLater(() -> pane.write("\r\nshell output stopped: " + ex.getMessage() + "\r\n"));
             }
@@ -102,6 +94,6 @@ public final class ShellSession implements AutoCloseable {
     public void close() {
         closed = true;
         reader.shutdownNow();
-        process.destroy();
+        pty.close();
     }
 }

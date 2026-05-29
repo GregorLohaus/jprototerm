@@ -18,6 +18,17 @@ nix profile add .
 jprototerm
 ```
 
+Or install straight from the remote — note the `git+https://` scheme (a bare `https://`
+URL is treated as a tarball, not a git repo):
+
+```sh
+nix profile add git+https://gitea.gregorlohaus.com/gregor/jprototerm
+```
+
+Add `?ref=<branch-or-tag>` to pin a revision. The target machine needs Nix with the
+`nix-command` and `flakes` features enabled and network access — the build fetches the
+`jlibghostty`/`ghostty` flake inputs plus the JDK and Gradle from the binary caches.
+
 The flake bundles everything the app needs — the JDK 25 runtime, the Maven JavaFX modules
 and their native libraries, and the gtk/glib/freetype/X11 libraries they load — **except**
 the system OpenGL/graphics drivers. `libGL` is supplied by the host at runtime through a GL

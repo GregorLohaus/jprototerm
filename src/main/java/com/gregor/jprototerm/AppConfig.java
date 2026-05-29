@@ -39,6 +39,9 @@ public record AppConfig(
             "new_pane",
             "next_floating",
             "close_pane",
+            "new_tab",
+            "previous_tab",
+            "next_tab",
             "open_font_selector",
             "open_scrollback"
     );
@@ -86,17 +89,20 @@ public record AppConfig(
                 true,
                 defaultScrollbackEditorCommand(),
                 Map.of(),
-                Map.of(
-                        "navigate_left", KeyBinding.parse("ALT+H"),
-                        "navigate_down", KeyBinding.parse("ALT+J"),
-                        "navigate_up", KeyBinding.parse("ALT+K"),
-                        "navigate_right", KeyBinding.parse("ALT+L"),
-                        "toggle_floating", KeyBinding.parse("ALT+F"),
-                        "new_pane", KeyBinding.parse("ALT+N"),
-                        "next_floating", KeyBinding.parse("ALT+F12"),
-                        "close_pane", KeyBinding.parse("ALT+X"),
-                        "open_font_selector", KeyBinding.parse("ALT+T"),
-                        "open_scrollback", KeyBinding.parse("ALT+S")
+                Map.ofEntries(
+                        Map.entry("navigate_left", KeyBinding.parse("ALT+H")),
+                        Map.entry("navigate_down", KeyBinding.parse("ALT+J")),
+                        Map.entry("navigate_up", KeyBinding.parse("ALT+K")),
+                        Map.entry("navigate_right", KeyBinding.parse("ALT+L")),
+                        Map.entry("toggle_floating", KeyBinding.parse("ALT+F")),
+                        Map.entry("new_pane", KeyBinding.parse("ALT+N")),
+                        Map.entry("next_floating", KeyBinding.parse("ALT+F12")),
+                        Map.entry("close_pane", KeyBinding.parse("ALT+X")),
+                        Map.entry("new_tab", KeyBinding.parse("ALT+A")),
+                        Map.entry("previous_tab", KeyBinding.parse("ALT+SHIFT+H")),
+                        Map.entry("next_tab", KeyBinding.parse("ALT+SHIFT+L")),
+                        Map.entry("open_font_selector", KeyBinding.parse("ALT+T")),
+                        Map.entry("open_scrollback", KeyBinding.parse("ALT+S"))
                 )
         );
     }

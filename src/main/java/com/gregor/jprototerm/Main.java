@@ -2,6 +2,7 @@ package com.gregor.jprototerm;
 
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
@@ -79,6 +80,20 @@ public final class Main extends Application {
             event.consume();
         } else if (config.keybindings().get("close_pane").matches(event)) {
             workspace.closeActivePane();
+            event.consume();
+            if (workspace.isEmpty()) {
+                // Closing the last pane quits the app.
+                workspace.close();
+                Platform.exit();
+            }
+        } else if (config.keybindings().get("new_tab").matches(event)) {
+            workspace.newTab();
+            event.consume();
+        } else if (config.keybindings().get("previous_tab").matches(event)) {
+            workspace.previousTab();
+            event.consume();
+        } else if (config.keybindings().get("next_tab").matches(event)) {
+            workspace.nextTab();
             event.consume();
         } else if (config.keybindings().get("open_font_selector").matches(event)) {
             openFontSelector();

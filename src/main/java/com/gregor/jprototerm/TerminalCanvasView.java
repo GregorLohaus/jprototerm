@@ -100,9 +100,6 @@ public final class TerminalCanvasView {
     }
 
     // GhosttyRenderStateDirty values (stable C ABI; see ghostty/vt/render.h).
-    private static final int DIRTY_PARTIAL = 1;
-    private static final int DIRTY_FULL = 2;
-
     // Thin tab strip shown at the top when more than one tab is open.
     private static final double TAB_BAR_HEIGHT = 22.0;
 
@@ -188,50 +185,20 @@ public final class TerminalCanvasView {
         gc.restore();
     }
 
-    // Repaint one pane whose content changed, then restore the (opaque) panes stacked above
-    // it wherever they overlap the repainted region, so the z-order stays correct.
+    // Repaint one pane whose content changed (a full, reliable repaint of the pane), then
+    // restore the (opaque) panes stacked above it where they overlap, keeping z-order.
     private void repaintPaneContent(GraphicsContext gc, List<TerminalPane> panes, int index, Font font, FontMetrics metrics) {
         TerminalPane pane = panes.get(index);
         double px = Math.round(pane.x());
         double py = Math.round(pane.y());
         double pw = pane.width();
         double ph = pane.height();
-        boolean kitty = config.kittyGraphics() && paneHasKittyGraphics(pane);
-
-        // A pane just resized (e.g. from a split) can't be trusted to report its dirty rows
-        // for the app's post-SIGWINCH redraw, so force a full snapshot once.
-        boolean forceFull = pane.consumeFullRender();
-
-        double regionY0;
-        double regionY1;
         gc.save();
         clipRect(gc, px, py, pw, ph);
-        if (kitty || forceFull) {
-            drawPaneContent(gc, pane, font, metrics, pane.renderSnapshotFull(), px, py, pw, ph, kitty);
-            regionY0 = py;
-            regionY1 = py + ph;
-        } else {
-            RenderStateSnapshot snapshot = pane.renderSnapshot();
-            int dirty = snapshot == null ? DIRTY_FULL : snapshot.dirty();
-            if (dirty == DIRTY_FULL) {
-                drawPaneContent(gc, pane, font, metrics, snapshot, px, py, pw, ph, false);
-                regionY0 = py;
-                regionY1 = py + ph;
-            } else if (dirty == DIRTY_PARTIAL) {
-                double[] band = drawDirtyRows(gc, pane, font, metrics, snapshot, px, py, pw, ph);
-                gc.restore();
-                if (band == null) {
-                    return;
-                }
-                restoreStackedAbove(gc, panes, index, font, metrics, px, band[0], pw, band[1] - band[0]);
-                return;
-            } else {
-                gc.restore();
-                return; // dirty == FALSE: nothing visible changed.
-            }
-        }
+        drawPaneContent(gc, pane, font, metrics, pane.renderSnapshot(), px, py, pw, ph,
+                config.kittyGraphics() && paneHasKittyGraphics(pane));
         gc.restore();
-        restoreStackedAbove(gc, panes, index, font, metrics, px, regionY0, pw, regionY1 - regionY0);
+        restoreStackedAbove(gc, panes, index, font, metrics, px, py, pw, ph);
     }
 
     // Redraw any panes above `index` in z-order that intersect the given screen rect, so a
@@ -251,7 +218,7 @@ public final class TerminalCanvasView {
             }
             gc.save();
             clipRect(gc, ox0, oy0, ox1 - ox0, oy1 - oy0);
-            drawPaneContent(gc, above, font, metrics, above.renderSnapshotFull(), ax, ay, above.width(), above.height(),
+            drawPaneContent(gc, above, font, metrics, above.renderSnapshot(), ax, ay, above.width(), above.height(),
                     config.kittyGraphics() && paneHasKittyGraphics(above));
             gc.restore();
         }

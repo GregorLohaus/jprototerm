@@ -6,7 +6,6 @@ import dev.jlibghostty.MouseAction;
 import dev.jlibghostty.MouseEncoder;
 import dev.jlibghostty.MouseEncoderSize;
 import dev.jlibghostty.MouseInput;
-import dev.jlibghostty.RenderState;
 import dev.jlibghostty.RenderStateSnapshot;
 import dev.jlibghostty.ScrollViewport;
 import dev.jlibghostty.Terminal;
@@ -27,9 +26,6 @@ public final class TerminalPane implements AutoCloseable {
 
     private final Terminal terminal;
     private final MouseEncoder mouseEncoder = new MouseEncoder();
-    // A persistent render state (reused across frames) is what makes ghostty's per-row
-    // dirty tracking meaningful: update() accumulates dirty since the last resetDirty().
-    private RenderState renderState = new RenderState();
     private RenderStateSnapshot cachedSnapshot;
     private ShellSession session;
     private boolean floating;
@@ -47,7 +43,6 @@ public final class TerminalPane implements AutoCloseable {
     private volatile long renderVersion;
     private long snapshotVersion = -1;
     private volatile boolean closed;
-    private boolean needsFullRender;
 
     private TerminalPane(Terminal terminal, int columns, int rows) {
         this.terminal = terminal;
@@ -135,34 +130,15 @@ public final class TerminalPane implements AutoCloseable {
     }
 
     /**
-     * Incremental snapshot: cells are marshalled only for rows that changed since the last
-     * frame (global dirty == PARTIAL), reused across calls for the same content version.
-     * Snapshotting is deferred here rather than done in refresh(), so a burst of writes
-     * between two frames collapses into a single snapshot.
+     * Full render snapshot of the current screen, memoised per content version (so a burst
+     * of writes between two frames yields one snapshot). Uses a throwaway render state per
+     * snapshot, which always returns the complete, correct screen — a persistent render
+     * state's per-row dirty tracking proved unreliable across resizes and screen clears.
      */
     public RenderStateSnapshot renderSnapshot() {
-        return snapshot(false);
-    }
-
-    /**
-     * Full snapshot with every row's cells populated. Used where the whole pane is redrawn
-     * regardless of dirty state (the kitty-graphics path).
-     */
-    public RenderStateSnapshot renderSnapshotFull() {
-        return snapshot(true);
-    }
-
-    private RenderStateSnapshot snapshot(boolean full) {
         synchronized (terminal) {
-            if (full) {
-                renderState.update(terminal);
-                cachedSnapshot = renderState.snapshot();
-                renderState.resetDirty();
-                snapshotVersion = renderVersion;
-            } else if (snapshotVersion != renderVersion) {
-                renderState.update(terminal);
-                cachedSnapshot = renderState.snapshotIncremental();
-                renderState.resetDirty();
+            if (snapshotVersion != renderVersion) {
+                cachedSnapshot = terminal.renderSnapshot();
                 snapshotVersion = renderVersion;
             }
             return cachedSnapshot;
@@ -241,25 +217,8 @@ public final class TerminalPane implements AutoCloseable {
             this.rows = rows;
             this.pixelWidth = pixelWidth;
             this.pixelHeight = pixelHeight;
-            // A persistent render state gets corrupted by a terminal resize: its next snapshot
-            // comes back blank (a throwaway render state, as ghostty's API was originally used,
-            // never had this). Recreate it so the next snapshot is a clean full render of the
-            // resized grid, even for an idle pane that won't redraw on its own.
-            renderState.close();
-            renderState = new RenderState();
-            snapshotVersion = -1;
-            // The app (e.g. a TUI) also redraws a moment later via SIGWINCH; force the next
-            // content repaint to use a full snapshot so we don't rely on dirty across the resize.
-            needsFullRender = true;
             refresh();
         }
-    }
-
-    /** Returns and clears the "force a full repaint" flag set by {@link #resize}. */
-    public boolean consumeFullRender() {
-        boolean pending = needsFullRender;
-        needsFullRender = false;
-        return pending;
     }
 
     private void refresh() {
@@ -281,7 +240,6 @@ public final class TerminalPane implements AutoCloseable {
             session = null;
         }
         mouseEncoder.close();
-        renderState.close();
         synchronized (terminal) {
             terminal.close();
         }

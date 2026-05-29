@@ -28,7 +28,7 @@ gluonfx {
     compilerArgs += [
             '-H:+ForeignAPISupport',
             '--enable-native-access=ALL-UNNAMED',
-            "-H:ConfigurationFileDirectories=${file('src/main/resources/META-INF/native-image/dev.jlibghostty/jlibghostty').absolutePath}"
+            "-H:ConfigurationFileDirectories=${file('src/main/resources/META-INF/native-image/dev.jlibghostty/jlibghostty').absolutePath}".toString()
     ]
 }
 

@@ -12,3 +12,4 @@ devenv.local.yaml
 .pre-commit-config.yaml
 build
 build
+.gradle

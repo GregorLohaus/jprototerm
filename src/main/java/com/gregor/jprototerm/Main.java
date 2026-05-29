@@ -71,8 +71,8 @@ public final class Main extends Application {
         } else if (config.keybindings().get("toggle_floating").matches(event)) {
             workspace.toggleFloating();
             event.consume();
-        } else if (config.keybindings().get("new_floating").matches(event)) {
-            workspace.createFloatingPane();
+        } else if (config.keybindings().get("new_pane").matches(event)) {
+            workspace.createPane();
             event.consume();
         } else if (config.keybindings().get("next_floating").matches(event)) {
             workspace.nextFloatingPane();

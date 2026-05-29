@@ -131,6 +131,25 @@ public final class TerminalWorkspace implements AutoCloseable {
         version++;
     }
 
+    /**
+     * "New pane": adds a floating pane while floating panes are shown, otherwise adds a
+     * tiled pane (the tiled row is redistributed equally by the layout).
+     */
+    public void createPane() {
+        if (anyFloatingVisible()) {
+            createFloatingPane();
+        } else {
+            TerminalPane pane = openPane(false);
+            panes.add(pane);
+            activeIndex = panes.size() - 1;
+            version++;
+        }
+    }
+
+    private boolean anyFloatingVisible() {
+        return panes.stream().anyMatch(pane -> pane.floating() && pane.visible());
+    }
+
     public void nextFloatingPane() {
         TerminalPane next = nextFloatingAfter(activeIndex);
         next.setVisible(true);

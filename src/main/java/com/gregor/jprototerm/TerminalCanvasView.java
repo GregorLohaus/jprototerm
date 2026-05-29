@@ -38,6 +38,9 @@ import java.util.Map;
 public final class TerminalCanvasView {
     private static final Color DEFAULT_FOREGROUND = Color.rgb(225, 229, 235);
     private static final Color SELECTED_BACKGROUND = Color.rgb(52, 92, 140);
+    // The default cell background (used for cells with no explicit bg, and as the foreground
+    // for reverse-video cells whose background is the terminal default).
+    private static final Color PANE_BACKGROUND = Color.rgb(9, 10, 12);
 
     private final Canvas canvas = new Canvas();
     private final TerminalWorkspace workspace;
@@ -198,12 +201,16 @@ public final class TerminalCanvasView {
         cache.contentVersion = pane.renderVersion();
         cache.layoutKey = layoutKey;
 
+        // Blit on integer pixels: a fractional destination resamples the whole buffer and
+        // smears the (now pixel-aligned) content back into seams.
+        double destX = Math.round(pane.x());
+        double destY = Math.round(pane.y());
         if (pane.floating()) {
             gc.setGlobalAlpha(0.96);
-            gc.drawImage(cache.image, pane.x(), pane.y());
+            gc.drawImage(cache.image, destX, destY);
             gc.setGlobalAlpha(1.0);
         } else {
-            gc.drawImage(cache.image, pane.x(), pane.y());
+            gc.drawImage(cache.image, destX, destY);
         }
     }
 
@@ -307,12 +314,16 @@ public final class TerminalCanvasView {
     private static FontMetrics measureFontMetrics(Font font) {
         Text text = new Text("┃MgÅjy");
         text.setFont(font);
-        double lineHeight = Math.max(1.0, text.getLayoutBounds().getHeight());
+        // Snap the cell size to whole pixels so cells tile on integer boundaries. Fractional
+        // cell metrics put every cell edge on a sub-pixel position, leaving anti-aliased
+        // seams that show up as a faint grid behind the themed cell backgrounds. Rounding
+        // leaves a few pixels of unused space at the right/bottom edge, which is fine.
+        double lineHeight = Math.max(1.0, Math.round(text.getLayoutBounds().getHeight()));
         double baselineOffset = -text.getLayoutBounds().getMinY();
 
         Text cell = new Text("M");
         cell.setFont(font);
-        double cellWidth = Math.max(1.0, cell.getLayoutBounds().getWidth());
+        double cellWidth = Math.max(1.0, Math.round(cell.getLayoutBounds().getWidth()));
         return new FontMetrics(cellWidth, lineHeight, baselineOffset);
     }
 
@@ -554,10 +565,24 @@ public final class TerminalCanvasView {
 
             double x = left + (cell.column() * cellWidth);
             double cellTop = top + (row.row() * lineHeight);
-            // Avoid the capturing lambda / Optional.map allocations per cell on this hot path.
-            var background = cell.background();
-            if (background.isPresent()) {
-                gc.setFill(toFxColor(background.get()));
+
+            // Resolve fg/bg (null bg = terminal default, painted by the pane background).
+            // Avoid Optional.map's allocation on this hot path.
+            var fgOpt = cell.foreground();
+            var bgOpt = cell.background();
+            Color fg = fgOpt.isPresent() ? toFxColor(fgOpt.get()) : DEFAULT_FOREGROUND;
+            Color bg = bgOpt.isPresent() ? toFxColor(bgOpt.get()) : null;
+
+            // Reverse video: ghostty does not bake inverse into the resolved colours, so we
+            // swap them here, falling back to the terminal defaults for whichever is unset.
+            if (cell.inverse()) {
+                Color swappedBg = fg;
+                fg = (bg != null) ? bg : PANE_BACKGROUND;
+                bg = swappedBg;
+            }
+
+            if (bg != null) {
+                gc.setFill(bg);
                 gc.fillRect(x, cellTop, cellWidth, lineHeight);
             }
             if (cell.selected()) {
@@ -569,8 +594,7 @@ public final class TerminalCanvasView {
             }
 
             double y = baseline + (row.row() * lineHeight);
-            var foregroundColor = cell.foreground();
-            gc.setFill(foregroundColor.isPresent() ? toFxColor(foregroundColor.get()) : DEFAULT_FOREGROUND);
+            gc.setFill(fg);
             gc.fillText(cell.text(), x, y);
         }
     }

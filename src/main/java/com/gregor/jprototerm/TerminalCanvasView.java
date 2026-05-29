@@ -50,7 +50,13 @@ public final class TerminalCanvasView {
     private FontMetrics cachedMetrics;
     private String cachedFontFamily;
     private double cachedFontSize;
-    private String lastRenderKey;
+    // Cheap per-frame dirty signal: skip the whole render when none of these changed.
+    private double lastWidth = -1.0;
+    private double lastHeight = -1.0;
+    private String lastFontFamily;
+    private double lastFontSize = -1.0;
+    private long lastWorkspaceVersion = Long.MIN_VALUE;
+    private long lastRenderTick = Long.MIN_VALUE;
     private boolean mouseButtonPressed;
     private MouseButton pressedButton = MouseButton.UNKNOWN;
 
@@ -77,22 +83,34 @@ public final class TerminalCanvasView {
         cachedFont = null;
         cachedMetrics = null;
         paneRenderCache.clear();
-        lastRenderKey = null;
+        lastWidth = -1.0; // force a redraw on the next frame
     }
 
     public void render() {
         double width = canvas.getWidth();
         double height = canvas.getHeight();
+
+        // Geometry is a pure function of (size, workspace version); content changes bump the
+        // global render tick. If none moved, nothing can have changed visually, so bail out
+        // before doing any layout/pane-list/render-key work — this runs ~60x/s while idle.
+        long workspaceVersion = workspace.version();
+        long renderTick = TerminalPane.renderTick();
+        if (width == lastWidth && height == lastHeight
+                && fontSize == lastFontSize && java.util.Objects.equals(fontFamily, lastFontFamily)
+                && workspaceVersion == lastWorkspaceVersion && renderTick == lastRenderTick) {
+            return;
+        }
+        lastWidth = width;
+        lastHeight = height;
+        lastFontFamily = fontFamily;
+        lastFontSize = fontSize;
+        lastWorkspaceVersion = workspaceVersion;
+        lastRenderTick = renderTick;
+
         workspace.layout(width, height);
         Font font = currentFont();
         FontMetrics metrics = currentFontMetrics();
         List<TerminalPane> panes = workspace.panes();
-
-        String renderKey = renderKey(width, height, metrics, panes);
-        if (renderKey.equals(lastRenderKey)) {
-            return;
-        }
-        lastRenderKey = renderKey;
 
         GraphicsContext gc = canvas.getGraphicsContext2D();
         gc.setFill(Color.rgb(16, 16, 18));
@@ -105,88 +123,122 @@ public final class TerminalCanvasView {
         }
     }
 
+    // GhosttyRenderStateDirty values (stable C ABI; see ghostty/vt/render.h).
+    private static final int DIRTY_PARTIAL = 1;
+    private static final int DIRTY_FULL = 2;
+
     private void drawPane(GraphicsContext gc, TerminalPane pane, Font font, FontMetrics metrics) {
+        // Resize up front so a geometry change is reflected as a FULL-dirty snapshot (with
+        // all cells) on this same frame, before we fetch the snapshot below.
+        int columns = Math.max(1, (int) ((pane.width() - 24.0) / metrics.cellWidth));
+        int rows = Math.max(1, (int) ((pane.height() - 24.0) / metrics.lineHeight));
+        pane.resize(columns, rows, (int) Math.round(metrics.cellWidth), (int) Math.round(metrics.lineHeight));
+
         if (config.kittyGraphics() && paneHasKittyGraphics(pane)) {
+            // Panes with kitty images redraw fully each frame (images compose with text),
+            // so they bypass the incremental offscreen cache and need every cell.
             paneRenderCache.remove(pane);
             gc.save();
+            if (pane.floating()) {
+                gc.setGlobalAlpha(0.96);
+            }
             gc.beginPath();
             gc.rect(pane.x(), pane.y(), pane.width(), pane.height());
             gc.clip();
-            drawPaneContent(gc, pane, font, metrics, pane.x(), pane.y(), pane.width(), pane.height(), false);
+            drawPaneContent(gc, pane, font, metrics, pane.renderSnapshotFull(),
+                    pane.x(), pane.y(), pane.width(), pane.height(), true);
             gc.restore();
             return;
         }
 
         PaneRenderCache cache = paneRenderCache.computeIfAbsent(pane, ignored -> new PaneRenderCache());
-        String cacheKey = paneCacheKey(pane, metrics);
         int imageWidth = Math.max(1, (int) Math.ceil(pane.width()));
         int imageHeight = Math.max(1, (int) Math.ceil(pane.height()));
 
-        // Allocate the offscreen buffers only when the pane size changes. Reallocating a
-        // full-pane Canvas + WritableImage on every content change churns ~20 MB per frame,
-        // which the native image's serial GC turns into Full-GC frame drops.
-        if (cache.canvas == null || cache.image == null || cache.imageWidth != imageWidth || cache.imageHeight != imageHeight) {
+        // Reuse the offscreen buffers; only reallocate when the pane size changes.
+        boolean sizeChanged = cache.canvas == null || cache.image == null
+                || cache.imageWidth != imageWidth || cache.imageHeight != imageHeight;
+        if (sizeChanged) {
             cache.canvas = new Canvas(imageWidth, imageHeight);
             cache.image = new WritableImage(imageWidth, imageHeight);
             cache.imageWidth = imageWidth;
             cache.imageHeight = imageHeight;
-            cache.key = null;
+            cache.layoutKey = null;
         }
 
-        // Redraw and re-snapshot into the existing buffers only when content changed.
-        if (!cacheKey.equals(cache.key)) {
-            GraphicsContext cacheGc = cache.canvas.getGraphicsContext2D();
-            cacheGc.clearRect(0, 0, imageWidth, imageHeight);
-            drawPaneContent(cacheGc, pane, font, metrics, 0.0, 0.0, imageWidth, imageHeight, true);
+        String layoutKey = paneLayoutKey(pane, metrics);
+        boolean firstDraw = sizeChanged || cache.layoutKey == null;
+        boolean layoutChanged = !layoutKey.equals(cache.layoutKey);
+        boolean contentChanged = pane.renderVersion() != cache.contentVersion;
+
+        GraphicsContext cacheGc = cache.canvas.getGraphicsContext2D();
+        boolean imageChanged = false;
+
+        if (firstDraw || contentChanged) {
+            RenderStateSnapshot snapshot = pane.renderSnapshot();
+            int dirty = snapshot == null ? DIRTY_FULL : snapshot.dirty();
+            if (firstDraw || dirty == DIRTY_FULL) {
+                cacheGc.clearRect(0.0, 0.0, imageWidth, imageHeight);
+                drawPaneContent(cacheGc, pane, font, metrics, snapshot, 0.0, 0.0, imageWidth, imageHeight, false);
+                imageChanged = true;
+            } else if (dirty == DIRTY_PARTIAL) {
+                drawDirtyRows(cacheGc, pane, font, metrics, snapshot, imageWidth, imageHeight);
+                imageChanged = true;
+            }
+            // dirty == FALSE: the write produced no visible change; keep the buffer.
+        }
+        if (!imageChanged && layoutChanged) {
+            // Only the active-border state changed; repaint the border over retained content.
+            drawBorder(cacheGc, pane, 0.0, 0.0, imageWidth, imageHeight);
+            imageChanged = true;
+        }
+        if (imageChanged) {
             cache.canvas.snapshot(null, cache.image);
-            cache.key = cacheKey;
         }
+        cache.contentVersion = pane.renderVersion();
+        cache.layoutKey = layoutKey;
 
-        gc.drawImage(cache.image, pane.x(), pane.y());
+        if (pane.floating()) {
+            gc.setGlobalAlpha(0.96);
+            gc.drawImage(cache.image, pane.x(), pane.y());
+            gc.setGlobalAlpha(1.0);
+        } else {
+            gc.drawImage(cache.image, pane.x(), pane.y());
+        }
     }
 
+    // Full content render: background, border, all rows, cursor, and (when enabled) kitty
+    // graphics. Used by the kitty direct path and by full offscreen redraws.
     private void drawPaneContent(
             GraphicsContext gc,
             TerminalPane pane,
             Font font,
             FontMetrics metrics,
+            RenderStateSnapshot snapshot,
             double x,
             double y,
             double width,
             double height,
-            boolean clear
+            boolean withKitty
     ) {
-        if (clear) {
-            gc.clearRect(x, y, width, height);
-        }
         gc.setFontSmoothingType(FontSmoothingType.LCD);
-        if (pane.floating()) {
-            gc.setGlobalAlpha(0.96);
-        }
+        // Paint content fully opaque. LCD subpixel text rendering produces colour fringing
+        // on a translucent surface, so floating-pane translucency is applied by the caller
+        // when the finished (opaque) buffer is composited onto the canvas.
         gc.setFill(Color.rgb(9, 10, 12));
         gc.fillRect(x, y, width, height);
-        gc.setGlobalAlpha(1.0);
-
-        gc.setStroke(workspace.isActive(pane) ? Color.rgb(87, 166, 255) : Color.rgb(52, 57, 65));
-        gc.setLineWidth(workspace.isActive(pane) ? 2.0 : 1.0);
-        gc.strokeRect(x + 0.5, y + 0.5, width - 1.0, height - 1.0);
-
+        drawBorder(gc, pane, x, y, width, height);
         gc.setFont(font);
-
-        int columns = Math.max(1, (int) ((width - 24.0) / metrics.cellWidth));
-        int rows = Math.max(1, (int) ((height - 24.0) / metrics.lineHeight));
-        pane.resize(columns, rows, (int) Math.round(metrics.cellWidth), (int) Math.round(metrics.lineHeight));
 
         double left = x + 12.0;
         double top = y + 12.0;
         double baseline = top + metrics.baselineOffset;
 
-        RenderStateSnapshot snapshot = pane.renderSnapshot();
-        Map<KittyPlaceholderKey, KittyPlaceholderBounds> placeholderBounds = config.kittyGraphics()
+        Map<KittyPlaceholderKey, KittyPlaceholderBounds> placeholderBounds = withKitty
                 ? kittyPlaceholderBounds(snapshot)
                 : Map.of();
 
-        if (config.kittyGraphics()) {
+        if (withKitty) {
             drawKittyGraphics(gc, pane, KittyPlacementLayer.BELOW_TEXT, placeholderBounds, left, top, metrics.cellWidth, metrics.lineHeight);
         }
 
@@ -194,15 +246,62 @@ public final class TerminalCanvasView {
             for (RenderRow row : snapshot.renderRows()) {
                 drawRow(gc, row, left, top, baseline, metrics.cellWidth, metrics.lineHeight);
             }
-        }
-
-        if (snapshot != null) {
             drawCursor(gc, snapshot, left, top, metrics.cellWidth, metrics.lineHeight);
         }
 
-        if (config.kittyGraphics()) {
+        if (withKitty) {
             drawKittyGraphics(gc, pane, KittyPlacementLayer.ABOVE_TEXT, placeholderBounds, left, top, metrics.cellWidth, metrics.lineHeight);
         }
+    }
+
+    // Incremental render: repaint only the rows ghostty flagged dirty in the offscreen
+    // buffer (origin 0,0), then restore the cursor and border.
+    private void drawDirtyRows(
+            GraphicsContext gc,
+            TerminalPane pane,
+            Font font,
+            FontMetrics metrics,
+            RenderStateSnapshot snapshot,
+            double width,
+            double height
+    ) {
+        gc.setFontSmoothingType(FontSmoothingType.LCD);
+        gc.setFont(font);
+        double left = 12.0;
+        double top = 12.0;
+        double baseline = top + metrics.baselineOffset;
+
+        boolean cursorRowDirty = false;
+        for (RenderRow row : snapshot.renderRows()) {
+            if (!row.dirty()) {
+                continue;
+            }
+            // Snap the row band to integer pixels and paint opaque (no clearRect): a
+            // fractional-height fill would leave sub-pixel-transparent seams between rows,
+            // which the floating-pane alpha compositing reveals as faint horizontal lines.
+            double y0 = Math.floor(top + (row.row() * metrics.lineHeight));
+            double y1 = Math.ceil(top + ((row.row() + 1) * metrics.lineHeight));
+            gc.setFill(Color.rgb(9, 10, 12));
+            gc.fillRect(0.0, y0, width, y1 - y0);
+            drawRow(gc, row, left, top, baseline, metrics.cellWidth, metrics.lineHeight);
+            if (snapshot.cursorViewportHasValue() && row.row() == snapshot.cursorViewportY()) {
+                cursorRowDirty = true;
+            }
+        }
+
+        // The cursor overlays its cell; redraw it only when its row was repainted, so we
+        // neither leave a stale cursor nor stack the translucent overlay on itself.
+        if (cursorRowDirty) {
+            drawCursor(gc, snapshot, left, top, metrics.cellWidth, metrics.lineHeight);
+        }
+        // Repainting rows clears the full width, erasing the side borders; restore the frame.
+        drawBorder(gc, pane, 0.0, 0.0, width, height);
+    }
+
+    private void drawBorder(GraphicsContext gc, TerminalPane pane, double x, double y, double width, double height) {
+        gc.setStroke(workspace.isActive(pane) ? Color.rgb(87, 166, 255) : Color.rgb(52, 57, 65));
+        gc.setLineWidth(workspace.isActive(pane) ? 2.0 : 1.0);
+        gc.strokeRect(x + 0.5, y + 0.5, width - 1.0, height - 1.0);
     }
 
     private static FontMetrics measureFontMetrics(Font font) {
@@ -234,31 +333,11 @@ public final class TerminalCanvasView {
         return cachedMetrics;
     }
 
-    private String renderKey(double width, double height, FontMetrics metrics, List<TerminalPane> panes) {
-        StringBuilder builder = new StringBuilder();
-        builder.append(width).append(':')
-                .append(height).append(':')
-                .append(workspace.version()).append(':')
-                .append(fontFamily).append(':')
-                .append(fontSize).append(':')
-                .append(metrics.cellWidth).append(':')
-                .append(metrics.lineHeight);
-        for (TerminalPane pane : panes) {
-            builder.append('|')
-                    .append(System.identityHashCode(pane)).append(',')
-                    .append(pane.renderVersion()).append(',')
-                    .append(workspace.isActive(pane)).append(',')
-                    .append(pane.x()).append(',')
-                    .append(pane.y()).append(',')
-                    .append(pane.width()).append(',')
-                    .append(pane.height());
-        }
-        return builder.toString();
-    }
-
-    private String paneCacheKey(TerminalPane pane, FontMetrics metrics) {
-        return pane.renderVersion()
-                + ":" + workspace.isActive(pane)
+    // Layout identity of a pane: everything that forces a redraw EXCEPT terminal content
+    // (which is tracked separately by renderVersion). Deliberately omits renderVersion so
+    // content changes go through the incremental dirty-row path instead of a full redraw.
+    private String paneLayoutKey(TerminalPane pane, FontMetrics metrics) {
+        return workspace.isActive(pane)
                 + ":" + pane.width()
                 + ":" + pane.height()
                 + ":" + fontFamily
@@ -475,10 +554,12 @@ public final class TerminalCanvasView {
 
             double x = left + (cell.column() * cellWidth);
             double cellTop = top + (row.row() * lineHeight);
-            cell.background().ifPresent(background -> {
-                gc.setFill(toFxColor(background));
+            // Avoid the capturing lambda / Optional.map allocations per cell on this hot path.
+            var background = cell.background();
+            if (background.isPresent()) {
+                gc.setFill(toFxColor(background.get()));
                 gc.fillRect(x, cellTop, cellWidth, lineHeight);
-            });
+            }
             if (cell.selected()) {
                 gc.setFill(SELECTED_BACKGROUND);
                 gc.fillRect(x, cellTop, cellWidth, lineHeight);
@@ -488,14 +569,29 @@ public final class TerminalCanvasView {
             }
 
             double y = baseline + (row.row() * lineHeight);
-            Color foreground = cell.foreground().map(TerminalCanvasView::toFxColor).orElse(DEFAULT_FOREGROUND);
-            gc.setFill(foreground);
+            var foregroundColor = cell.foreground();
+            gc.setFill(foregroundColor.isPresent() ? toFxColor(foregroundColor.get()) : DEFAULT_FOREGROUND);
             gc.fillText(cell.text(), x, y);
         }
     }
 
+    // A full-screen redraw asks for one Color per cell; most cells share a handful of
+    // colors, so cache them by packed RGB instead of allocating a Color each time. Bounded
+    // so a truecolor gradient can't grow it without limit.
+    private static final Map<Integer, Color> COLOR_CACHE = new HashMap<>();
+
     private static Color toFxColor(RenderColor color) {
-        return Color.rgb(color.red(), color.green(), color.blue());
+        int key = (color.red() << 16) | (color.green() << 8) | color.blue();
+        Color cached = COLOR_CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        if (COLOR_CACHE.size() >= 4096) {
+            COLOR_CACHE.clear();
+        }
+        Color created = Color.rgb(color.red(), color.green(), color.blue());
+        COLOR_CACHE.put(key, created);
+        return created;
     }
 
     private static void drawCursor(GraphicsContext gc, RenderStateSnapshot snapshot, double left, double top, double cellWidth, double lineHeight) {
@@ -718,7 +814,12 @@ public final class TerminalCanvasView {
     private record MouseTarget(MouseEncoderSize size, long screenWidth, long screenHeight) {
     }
 
-    private record KittyImageKey(long id, long number, long width, long height, KittyImageFormat format, int dataLength, long fingerprint) {
+    // A kitty image is immutable for a given (id, number); re-transmitting under the same
+    // id changes the number (and the snapshot below evicts stale entries by id anyway). So
+    // the identity + dimensions + payload length are enough to key the decoded-image cache,
+    // and we avoid fingerprinting the whole payload — which previously ran once per frame
+    // per placement (O(image size)) just to look the image up.
+    private record KittyImageKey(long id, long number, long width, long height, KittyImageFormat format, int dataLength) {
         private static KittyImageKey of(KittyImageSnapshot snapshot, byte[] data) {
             return new KittyImageKey(
                     snapshot.id(),
@@ -726,18 +827,8 @@ public final class TerminalCanvasView {
                     snapshot.width(),
                     snapshot.height(),
                     snapshot.format(),
-                    data.length,
-                    fingerprint(data)
+                    data.length
             );
-        }
-
-        private static long fingerprint(byte[] data) {
-            long hash = 0xcbf29ce484222325L;
-            for (byte value : data) {
-                hash ^= Byte.toUnsignedInt(value);
-                hash *= 0x100000001b3L;
-            }
-            return hash;
         }
     }
 
@@ -794,6 +885,7 @@ public final class TerminalCanvasView {
         private WritableImage image;
         private int imageWidth;
         private int imageHeight;
-        private String key;
+        private String layoutKey;
+        private long contentVersion = Long.MIN_VALUE;
     }
 }

@@ -6,6 +6,7 @@ import dev.jlibghostty.MouseAction;
 import dev.jlibghostty.MouseEncoder;
 import dev.jlibghostty.MouseEncoderSize;
 import dev.jlibghostty.MouseInput;
+import dev.jlibghostty.RenderState;
 import dev.jlibghostty.RenderStateSnapshot;
 import dev.jlibghostty.ScrollViewport;
 import dev.jlibghostty.Terminal;
@@ -13,12 +14,23 @@ import dev.jlibghostty.TerminalOptions;
 import dev.jlibghostty.DeviceAttributes;
 
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class TerminalPane implements AutoCloseable {
+    // Monotonic across all panes, bumped on every content change. Lets the renderer detect
+    // "nothing changed" in O(1) without scanning panes or building a render key.
+    private static final AtomicLong RENDER_TICK = new AtomicLong();
+
+    public static long renderTick() {
+        return RENDER_TICK.get();
+    }
+
     private final Terminal terminal;
     private final MouseEncoder mouseEncoder = new MouseEncoder();
-    private final AtomicReference<RenderStateSnapshot> renderSnapshot = new AtomicReference<>();
+    // A persistent render state (reused across frames) is what makes ghostty's per-row
+    // dirty tracking meaningful: update() accumulates dirty since the last resetDirty().
+    private final RenderState renderState = new RenderState();
+    private RenderStateSnapshot cachedSnapshot;
     private ShellSession session;
     private boolean floating;
     private boolean visible = true;
@@ -31,6 +43,7 @@ public final class TerminalPane implements AutoCloseable {
     private int pixelWidth;
     private int pixelHeight;
     private long renderVersion;
+    private long snapshotVersion = -1;
 
     private TerminalPane(Terminal terminal, int columns, int rows) {
         this.terminal = terminal;
@@ -111,8 +124,39 @@ public final class TerminalPane implements AutoCloseable {
         }
     }
 
+    /**
+     * Incremental snapshot: cells are marshalled only for rows that changed since the last
+     * frame (global dirty == PARTIAL), reused across calls for the same content version.
+     * Snapshotting is deferred here rather than done in refresh(), so a burst of writes
+     * between two frames collapses into a single snapshot.
+     */
     public RenderStateSnapshot renderSnapshot() {
-        return renderSnapshot.get();
+        return snapshot(false);
+    }
+
+    /**
+     * Full snapshot with every row's cells populated. Used where the whole pane is redrawn
+     * regardless of dirty state (the kitty-graphics path).
+     */
+    public RenderStateSnapshot renderSnapshotFull() {
+        return snapshot(true);
+    }
+
+    private RenderStateSnapshot snapshot(boolean full) {
+        synchronized (terminal) {
+            if (full) {
+                renderState.update(terminal);
+                cachedSnapshot = renderState.snapshot();
+                renderState.resetDirty();
+                snapshotVersion = renderVersion;
+            } else if (snapshotVersion != renderVersion) {
+                renderState.update(terminal);
+                cachedSnapshot = renderState.snapshotIncremental();
+                renderState.resetDirty();
+                snapshotVersion = renderVersion;
+            }
+            return cachedSnapshot;
+        }
     }
 
     public String scrollbackText() {
@@ -192,8 +236,10 @@ public final class TerminalPane implements AutoCloseable {
     }
 
     private void refresh() {
-        renderSnapshot.set(terminal.renderSnapshot());
+        // Only mark the pane dirty; the snapshot itself is computed lazily in
+        // renderSnapshot() so a burst of writes collapses into a single snapshot per frame.
         renderVersion++;
+        RENDER_TICK.incrementAndGet();
     }
 
     @Override
@@ -203,6 +249,7 @@ public final class TerminalPane implements AutoCloseable {
             session = null;
         }
         mouseEncoder.close();
+        renderState.close();
         terminal.close();
     }
 }

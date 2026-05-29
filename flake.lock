@@ -70,11 +70,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1780050576,
-        "narHash": "sha256-u06xuO3QnLDpajIOZwDdhwI0HGzMuXG7x1pR+4Zb+RA=",
+        "lastModified": 1780076430,
+        "narHash": "sha256-N3p4+vhuo8DEQwnOYrGdTPbQmlyxnnLOqsSoDRx8eQA=",
         "ref": "refs/heads/main",
-        "rev": "d558d554b360a76d03c2fc09d327e3ec4aade878",
-        "revCount": 17,
+        "rev": "5bbba354ab3cd26a595cb864b29430bc312aa726",
+        "revCount": 19,
         "type": "git",
         "url": "https://gitea.gregorlohaus.com/gregor/jlibghostty.git"
       },

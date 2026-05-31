@@ -26,7 +26,7 @@ final class KeyEncoder {
         return switch (code) {
             case ENTER -> "\r";
             case BACK_SPACE -> "\u007f";
-            case TAB -> "\t";
+            case TAB -> event.isShiftDown() ? "\u001b[Z" : "\t";
             case ESCAPE -> "\u001b";
             case UP -> "\u001b[A";
             case DOWN -> "\u001b[B";

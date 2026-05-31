@@ -825,14 +825,6 @@ final class TerminalPaneNode extends Region {
             return Math.ceil(TerminalMetrics.PADDING + (row + 1) * metrics.lineHeight());
         }
 
-        // Left edge of a column, snapped to a whole device pixel. Both the clearRect and the
-        // background fillRect go through this so a run's edges land on integer pixels: at a
-        // fractional boundary clearRect clears the edge pixel fully while fillRect would only
-        // cover it partially, leaving a thin transparent (black) seam through the line.
-        private double columnX(int column) {
-            return Math.round(TerminalMetrics.PADDING + column * metrics.cellWidth());
-        }
-
         private void repaintColumns(GraphicsContext gc, RenderRow row, int startColumn, int endColumn) {
             if (endColumn < startColumn) {
                 return;
@@ -844,8 +836,8 @@ final class TerminalPaneNode extends Region {
             double contentTop = TerminalMetrics.PADDING + row.row() * lineHeight;
             double localCellTop = contentTop - rowTop;
             double baseline = TerminalMetrics.PADDING + metrics.baselineOffset() + row.row() * lineHeight - rowTop;
-            double x = columnX(startColumn);
-            double width = columnX(endColumn + 1) - x;
+            double x = TerminalMetrics.PADDING + startColumn * cellWidth;
+            double width = (endColumn - startColumn + 1) * cellWidth;
 
             gc.clearRect(x, 0.0, width, canvas.getHeight());
             if (startColumn == 0) {
@@ -853,7 +845,7 @@ final class TerminalPaneNode extends Region {
                 gc.fillRect(0.0, 0.0, TerminalMetrics.PADDING, canvas.getHeight());
             }
             if (endColumn >= row.cells().size() - 1) {
-                double contentRight = columnX(row.cells().size());
+                double contentRight = TerminalMetrics.PADDING + row.cells().size() * cellWidth;
                 gc.setFill(rowEdgeBackground(row, false));
                 gc.fillRect(contentRight, 0.0, canvas.getWidth() - contentRight, canvas.getHeight());
             }
@@ -868,7 +860,7 @@ final class TerminalPaneNode extends Region {
                 return;
             }
             double contentLeft = TerminalMetrics.PADDING;
-            double contentRight = columnX(columns);
+            double contentRight = contentLeft + columns * metrics.cellWidth();
             gc.setFill(rowEdgeBackground(row, true));
             gc.fillRect(0.0, 0.0, contentLeft, bandHeight);
             gc.setFill(rowEdgeBackground(row, false));
@@ -922,12 +914,11 @@ final class TerminalPaneNode extends Region {
             if (background == null || endColumn < startColumn) {
                 return;
             }
-            double left = columnX(startColumn);
             gc.setFill(background);
             gc.fillRect(
-                    left,
+                    TerminalMetrics.PADDING + startColumn * cellWidth,
                     localCellTop,
-                    columnX(endColumn + 1) - left,
+                    (endColumn - startColumn + 1) * cellWidth,
                     lineHeight);
         }
 

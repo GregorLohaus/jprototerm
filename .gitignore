@@ -11,6 +11,10 @@ devenv.local.yaml
 # pre-commit
 .pre-commit-config.yaml
 build
-build
 .gradle
 bin
+.settings
+.project
+.worktrees
+.classpath
+.codexsession

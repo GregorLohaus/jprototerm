@@ -44,6 +44,12 @@ final class TerminalPaneNode extends Region {
     private static final int DIRTY_PARTIAL = 1;
     private static final int DIRTY_FULL = 2;
 
+    // Debug toggle: when set, skip the per-column repaint and always repaint the whole row.
+    // Used to bisect partial-repaint artifacts (stale black bars near the cursor).
+    private static final boolean FULL_ROW_REPAINT =
+            Boolean.getBoolean("jprototerm.fullRowRepaint")
+                    || "1".equals(System.getenv("JPROTOTERM_FULL_ROW_REPAINT"));
+
     private static final Color DEFAULT_FOREGROUND = Color.rgb(225, 229, 235);
     private static final Color SELECTED_BACKGROUND = Color.rgb(52, 92, 140);
     private static final Color PANE_BACKGROUND = Color.rgb(9, 10, 12);
@@ -734,6 +740,10 @@ final class TerminalPaneNode extends Region {
         }
 
         private void renderChanged(RenderRow row) {
+            if (FULL_ROW_REPAINT) {
+                render(row);
+                return;
+            }
             double oldWidth = canvas.getWidth();
             double oldHeight = canvas.getHeight();
             prepareCanvas(row);

@@ -50,6 +50,13 @@ final class TerminalPaneNode extends Region {
             Boolean.getBoolean("jprototerm.fullRowRepaint")
                     || "1".equals(System.getenv("JPROTOTERM_FULL_ROW_REPAINT"));
 
+    // Debug toggle: paint each repaint run's cleared span red instead of clearing it to
+    // transparent. If the black bars turn red, they are spans repaintColumns clears but never
+    // refills; if they stay black, those pixels are never touched by repaintColumns at all.
+    private static final boolean DEBUG_REPAINT =
+            Boolean.getBoolean("jprototerm.debugRepaint")
+                    || "1".equals(System.getenv("JPROTOTERM_DEBUG_REPAINT"));
+
     private static final Color DEFAULT_FOREGROUND = Color.rgb(225, 229, 235);
     private static final Color SELECTED_BACKGROUND = Color.rgb(52, 92, 140);
     private static final Color PANE_BACKGROUND = Color.rgb(9, 10, 12);
@@ -839,7 +846,12 @@ final class TerminalPaneNode extends Region {
             double x = TerminalMetrics.PADDING + startColumn * cellWidth;
             double width = (endColumn - startColumn + 1) * cellWidth;
 
-            gc.clearRect(x, 0.0, width, canvas.getHeight());
+            if (DEBUG_REPAINT) {
+                gc.setFill(Color.RED);
+                gc.fillRect(x, 0.0, width, canvas.getHeight());
+            } else {
+                gc.clearRect(x, 0.0, width, canvas.getHeight());
+            }
             if (startColumn == 0) {
                 gc.setFill(rowEdgeBackground(row, true));
                 gc.fillRect(0.0, 0.0, TerminalMetrics.PADDING, canvas.getHeight());

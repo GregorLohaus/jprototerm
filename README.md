@@ -132,3 +132,22 @@ open_scrollback = "ALT+S"
 Each tab has its own stack of tiled and floating panes; only the active tab is rendered. A
 thin tab bar appears at the top when more than one tab is open. Closing the last tiled pane
 while floating panes exist promotes the most recently active floating pane to a tiled pane.
+
+## Diagnostics
+
+Two render-debugging flags are off by default and add no overhead unless enabled. Pass them
+as JVM system properties (each also has an environment-variable equivalent). With the
+packaged binary the JVM picks them up from `JDK_JAVA_OPTIONS`:
+
+```sh
+JDK_JAVA_OPTIONS="-Djprototerm.profile=true" ./result/bin/jprototerm
+```
+
+- `-Djprototerm.profile=true` (or `JPROTOTERM_PROFILE=1`): print a `[render-profile]` line to
+  stderr every N renders with the per-frame cost of each render stage — `snapshot` (terminal
+  state marshalling), `fingerprint` (change detection), `draw` (canvas painting), and the
+  `frame-total`. Set `-Djprototerm.profile.frames=<N>` to change the dump interval (default
+  120).
+- `-Djprototerm.debugRepaint=true` (or `JPROTOTERM_DEBUG_REPAINT=1`): paint each per-column
+  repaint run's cleared span red instead of clearing it. Repainted regions flash red, so you
+  can see exactly which cells are being redrawn each frame.

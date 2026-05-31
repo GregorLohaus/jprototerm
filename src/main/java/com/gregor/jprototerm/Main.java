@@ -21,20 +21,20 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 public final class Main extends Application {
-    private TerminalWorkspace workspace;
-    private TerminalCanvasView terminalView;
+    private Compositor compositor;
+    private TerminalMetrics metrics;
     private AppConfig config;
 
     @Override
     public void start(Stage stage) {
         config = AppConfig.load();
 
-        workspace = new TerminalWorkspace(config);
-        terminalView = new TerminalCanvasView(workspace, config);
+        metrics = new TerminalMetrics(config.fontFamily(), config.fontSize());
+        compositor = new Compositor(config, metrics);
 
-        StackPane root = new StackPane(terminalView.canvas());
-        terminalView.canvas().widthProperty().bind(root.widthProperty());
-        terminalView.canvas().heightProperty().bind(root.heightProperty());
+        StackPane root = new StackPane(compositor.canvas());
+        compositor.canvas().widthProperty().bind(root.widthProperty());
+        compositor.canvas().heightProperty().bind(root.heightProperty());
 
         Scene scene = new Scene(root, config.windowWidth(), config.windowHeight());
         scene.addEventFilter(KeyEvent.KEY_PRESSED, this::handlePressed);
@@ -43,57 +43,57 @@ public final class Main extends Application {
         new AnimationTimer() {
             @Override
             public void handle(long now) {
-                terminalView.render();
+                compositor.render();
             }
         }.start();
 
         stage.setTitle("jprototerm");
         stage.setScene(scene);
         stage.setOnCloseRequest(event -> {
-            workspace.close();
+            compositor.close();
         });
         stage.show();
-        terminalView.canvas().requestFocus();
+        compositor.canvas().requestFocus();
     }
 
     private void handlePressed(KeyEvent event) {
         if (config.keybindings().get("navigate_left").matches(event)) {
-            workspace.navigate(Direction.LEFT);
+            compositor.navigate(Direction.LEFT);
             event.consume();
         } else if (config.keybindings().get("navigate_down").matches(event)) {
-            workspace.navigate(Direction.DOWN);
+            compositor.navigate(Direction.DOWN);
             event.consume();
         } else if (config.keybindings().get("navigate_up").matches(event)) {
-            workspace.navigate(Direction.UP);
+            compositor.navigate(Direction.UP);
             event.consume();
         } else if (config.keybindings().get("navigate_right").matches(event)) {
-            workspace.navigate(Direction.RIGHT);
+            compositor.navigate(Direction.RIGHT);
             event.consume();
         } else if (config.keybindings().get("toggle_floating").matches(event)) {
-            workspace.toggleFloating();
+            compositor.toggleFloating();
             event.consume();
         } else if (config.keybindings().get("new_pane").matches(event)) {
-            workspace.createPane();
+            compositor.createPane();
             event.consume();
         } else if (config.keybindings().get("next_floating").matches(event)) {
-            workspace.nextFloatingPane();
+            compositor.nextFloatingPane();
             event.consume();
         } else if (config.keybindings().get("close_pane").matches(event)) {
-            workspace.closeActivePane();
+            compositor.closeActivePane();
             event.consume();
-            if (workspace.isEmpty()) {
+            if (compositor.isEmpty()) {
                 // Closing the last pane quits the app.
-                workspace.close();
+                compositor.close();
                 Platform.exit();
             }
         } else if (config.keybindings().get("new_tab").matches(event)) {
-            workspace.newTab();
+            compositor.newTab();
             event.consume();
         } else if (config.keybindings().get("previous_tab").matches(event)) {
-            workspace.previousTab();
+            compositor.previousTab();
             event.consume();
         } else if (config.keybindings().get("next_tab").matches(event)) {
-            workspace.nextTab();
+            compositor.nextTab();
             event.consume();
         } else if (config.keybindings().get("open_font_selector").matches(event)) {
             openFontSelector();
@@ -104,7 +104,7 @@ public final class Main extends Application {
         } else {
             String encoded = KeyEncoder.encode(event);
             if (encoded != null) {
-                workspace.activePane().send(encoded);
+                compositor.activePane().send(encoded);
                 event.consume();
             }
         }
@@ -117,7 +117,7 @@ public final class Main extends Application {
 
         String text = event.getCharacter();
         if (text != null && !text.isEmpty() && text.charAt(0) >= 0x20 && text.charAt(0) != 0x7f) {
-            workspace.activePane().send(text);
+            compositor.activePane().send(text);
             event.consume();
         }
     }
@@ -160,18 +160,18 @@ public final class Main extends Application {
                     double selectedSize = size.getValue();
                     config = config.withFont(selectedFamily.trim(), selectedSize);
                     config.save();
-                    terminalView.setFont(config.fontFamily(), config.fontSize());
-                    terminalView.canvas().requestFocus();
+                    compositor.setFont(config.fontFamily(), config.fontSize());
+                    compositor.canvas().requestFocus();
                 });
     }
 
     private void openScrollbackInEditor() {
         try {
             Path file = Files.createTempFile("jprototerm-scrollback-", ".txt");
-            Files.writeString(file, workspace.activePane().scrollbackText());
+            Files.writeString(file, compositor.activePane().scrollbackText());
             file.toFile().deleteOnExit();
 
-            workspace.activePane().send(scrollbackEditorCommand(file) + "\r");
+            compositor.activePane().send(scrollbackEditorCommand(file) + "\r");
         } catch (IOException ex) {
             System.err.println("Could not open scrollback in editor: " + ex.getMessage());
         }

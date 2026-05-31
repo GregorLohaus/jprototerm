@@ -44,11 +44,6 @@ final class TerminalPaneNode extends Region {
     private static final int DIRTY_PARTIAL = 1;
     private static final int DIRTY_FULL = 2;
 
-    // Glyphs (bold/italic/wide) can overhang into neighbouring cells. When repainting a
-    // column run we redraw this many extra cells of text on each side, clipped to the
-    // cleared span, so a neighbour's overhang is restored without disturbing its own cell.
-    private static final int GLYPH_OVERHANG_CELLS = 2;
-
     // Debug toggle: when set, skip the per-column repaint and always repaint the whole row.
     // Used to bisect partial-repaint artifacts (stale black bars near the cursor).
     private static final boolean FULL_ROW_REPAINT =
@@ -856,18 +851,7 @@ final class TerminalPaneNode extends Region {
             }
 
             drawRowBackgrounds(gc, row, localCellTop, cellWidth, lineHeight, startColumn, endColumn);
-
-            // Repaint text for a few neighbouring cells too, clipped to the cleared span, so
-            // any glyph overhang from just-outside cells (erased by the clearRect above) is
-            // restored. The clip keeps us from touching those neighbours' own cell areas.
-            gc.save();
-            gc.beginPath();
-            gc.rect(x, 0.0, width, canvas.getHeight());
-            gc.clip();
-            int textStart = Math.max(0, startColumn - GLYPH_OVERHANG_CELLS);
-            int textEnd = Math.min(row.cells().size() - 1, endColumn + GLYPH_OVERHANG_CELLS);
-            drawRowText(gc, row, baseline, cellWidth, textStart, textEnd);
-            gc.restore();
+            drawRowText(gc, row, baseline, cellWidth, startColumn, endColumn);
         }
 
         private void paintSidePadding(GraphicsContext gc, RenderRow row, double paneWidth, double bandHeight) {

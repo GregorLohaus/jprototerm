@@ -12,14 +12,21 @@ import dev.jlibghostty.RenderColor;
 import dev.jlibghostty.RenderCursorStyle;
 import dev.jlibghostty.RenderRow;
 import dev.jlibghostty.RenderStateSnapshot;
+import javafx.scene.SnapshotParameters;
+import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat;
+import javafx.scene.image.PixelBuffer;
+import javafx.scene.image.PixelReader;
 import javafx.scene.image.WritableImage;
 import javafx.scene.paint.Color;
 import javafx.scene.text.FontSmoothingType;
+import javafx.scene.text.Text;
 
 import java.io.ByteArrayInputStream;
+import java.nio.IntBuffer;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +58,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     private final TerminalMetrics metrics;
     // Decoded kitty images for this renderer's pane (kitty graphics state is per-terminal).
     private final Map<KittyImageKey, Image> kittyImageCache = new HashMap<>();
+    private final SoftwareBackbuffer software = new SoftwareBackbuffer();
 
     GhosttyTerminalRenderer(TerminalMetrics metrics) {
         this.metrics = metrics;
@@ -64,8 +72,14 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         double height = target.height();
         gc.save();
         clip(gc, px, py, width, height, target.clip());
-        drawContent(gc, target, target.snapshotFull(), px, py, width, height, active,
-                target.kittyEnabled() && hasKittyGraphics(target));
+        boolean withKitty = target.kittyEnabled() && hasKittyGraphics(target);
+        RenderStateSnapshot snapshot = target.snapshotFull();
+        if (withKitty) {
+            drawContent(gc, target, snapshot, px, py, width, height, active, true);
+            software.invalidate();
+        } else {
+            software.paintFull(gc, snapshot, px, py, width, height, active);
+        }
         gc.restore();
     }
 
@@ -80,13 +94,18 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         if (target.kittyEnabled() && hasKittyGraphics(target)) {
             // Kitty placements can move without a per-row dirty flag, so always redraw whole.
             drawContent(gc, target, target.snapshotFull(), px, py, width, height, active, true);
+            software.invalidate();
         } else {
             RenderStateSnapshot snapshot = target.snapshot();
             int dirty = snapshot == null ? DIRTY_FULL : snapshot.dirty();
             if (dirty == DIRTY_FULL) {
-                drawContent(gc, target, snapshot, px, py, width, height, active, false);
+                software.paintFullOrShifted(gc, target.snapshotFull(), px, py, width, height, active);
             } else if (dirty == DIRTY_PARTIAL) {
-                drawDirtyRows(gc, snapshot, px, py, width, height, active);
+                if (snapshot != null && snapshot.renderRows().size() == snapshot.rows()) {
+                    software.paintFullOrShifted(gc, snapshot, px, py, width, height, active);
+                } else {
+                    software.paintDirty(gc, snapshot, px, py, width, height, active);
+                }
             }
             // dirty == FALSE: nothing visible changed.
         }
@@ -649,6 +668,581 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             }
         }
         return result;
+    }
+
+    private final class SoftwareBackbuffer {
+        private int width;
+        private int height;
+        private int[] pixels = new int[0];
+        private PixelBuffer<IntBuffer> pixelBuffer;
+        private WritableImage image;
+        private long[] rowHashes = new long[0];
+        private CursorState lastCursor = CursorState.none();
+        private GlyphCache glyphs;
+
+        private void invalidate() {
+            rowHashes = new long[0];
+            lastCursor = CursorState.none();
+        }
+
+        private void paintFull(GraphicsContext gc, RenderStateSnapshot snapshot,
+                double px, double py, double paneWidth, double paneHeight, boolean active) {
+            ensure(paneWidth, paneHeight);
+            fillRect(0, 0, width, height, argbPre(PANE_BACKGROUND));
+            if (snapshot != null) {
+                paintSnapshot(snapshot);
+                drawCursor(snapshot);
+                rememberSnapshot(snapshot);
+            } else {
+                invalidate();
+            }
+            drawBorder(active);
+            present(gc, px, py);
+        }
+
+        private void paintFullOrShifted(GraphicsContext gc, RenderStateSnapshot snapshot,
+                double px, double py, double paneWidth, double paneHeight, boolean active) {
+            ensure(paneWidth, paneHeight);
+            if (snapshot == null || !canDiff(snapshot)) {
+                paintFull(gc, snapshot, px, py, paneWidth, paneHeight, active);
+                return;
+            }
+
+            long[] currentHashes = hashes(snapshot);
+            int scroll = inferScroll(currentHashes);
+            if (scroll != 0) {
+                scrollContentPixels(scroll);
+                scrollHashes(scroll);
+            }
+
+            CursorState cursor = CursorState.from(snapshot);
+            int oldCursorRow = shiftedCursorRow(lastCursor, scroll);
+            int newCursorRow = cursor.viewportRow();
+            boolean cursorChanged = !cursor.equals(lastCursor);
+            for (RenderRow row : snapshot.renderRows()) {
+                int rowIndex = row.row();
+                boolean repaint = currentHashes[rowIndex] != rowHashes[rowIndex]
+                        || rowIndex == newCursorRow
+                        || (cursorChanged && rowIndex == oldCursorRow);
+                if (repaint) {
+                    paintRow(row);
+                    rowHashes[rowIndex] = currentHashes[rowIndex];
+                }
+            }
+            lastCursor = cursor;
+            drawCursor(snapshot);
+            drawBorder(active);
+            present(gc, px, py);
+        }
+
+        private void paintDirty(GraphicsContext gc, RenderStateSnapshot snapshot,
+                double px, double py, double paneWidth, double paneHeight, boolean active) {
+            ensure(paneWidth, paneHeight);
+            if (snapshot == null) {
+                return;
+            }
+            if (rowHashes.length != snapshot.rows()) {
+                paintFull(gc, snapshot, px, py, paneWidth, paneHeight, active);
+                return;
+            }
+
+            CursorState cursor = CursorState.from(snapshot);
+            int oldCursorRow = lastCursor.viewportRow();
+            int newCursorRow = cursor.viewportRow();
+            boolean cursorChanged = !cursor.equals(lastCursor);
+            boolean[] repainted = new boolean[snapshot.rows()];
+
+            for (RenderRow row : snapshot.renderRows()) {
+                if (!row.dirty()) {
+                    continue;
+                }
+                paintRow(row);
+                rowHashes[row.row()] = rowHash(row);
+                repainted[row.row()] = true;
+            }
+
+            if (cursorChanged) {
+                repaintCursorRow(snapshot, oldCursorRow, repainted);
+            }
+            repaintCursorRow(snapshot, newCursorRow, repainted);
+            lastCursor = cursor;
+            drawCursor(snapshot);
+            drawBorder(active);
+            present(gc, px, py);
+        }
+
+        private void repaintCursorRow(RenderStateSnapshot snapshot, int rowIndex, boolean[] repainted) {
+            if (rowIndex < 0 || rowIndex >= repainted.length || repainted[rowIndex]) {
+                return;
+            }
+            RenderRow row = rowByIndex(snapshot, rowIndex);
+            if (row != null) {
+                paintRow(row);
+                rowHashes[rowIndex] = rowHash(row);
+                repainted[rowIndex] = true;
+            }
+        }
+
+        private RenderRow rowByIndex(RenderStateSnapshot snapshot, int rowIndex) {
+            for (RenderRow row : snapshot.renderRows()) {
+                if (row.row() == rowIndex) {
+                    return row;
+                }
+            }
+            return null;
+        }
+
+        private void ensure(double paneWidth, double paneHeight) {
+            int nextWidth = Math.max(1, (int) Math.round(paneWidth));
+            int nextHeight = Math.max(1, (int) Math.round(paneHeight));
+            if (nextWidth == width && nextHeight == height && image != null) {
+                ensureGlyphs();
+                return;
+            }
+
+            width = nextWidth;
+            height = nextHeight;
+            pixels = new int[width * height];
+            pixelBuffer = new PixelBuffer<>(width, height, IntBuffer.wrap(pixels), PixelFormat.getIntArgbPreInstance());
+            image = new WritableImage(pixelBuffer);
+            invalidate();
+            ensureGlyphs();
+        }
+
+        private void ensureGlyphs() {
+            int cellWidth = cellWidth();
+            int lineHeight = lineHeight();
+            double baseline = metrics.baselineOffset();
+            if (glyphs == null || glyphs.font != metrics.font()
+                    || glyphs.cellWidth != cellWidth || glyphs.lineHeight != lineHeight || glyphs.baseline != baseline) {
+                glyphs = new GlyphCache(metrics.font(), cellWidth, lineHeight, baseline);
+            }
+        }
+
+        private void present(GraphicsContext gc, double px, double py) {
+            pixelBuffer.updateBuffer(ignored -> null);
+            gc.drawImage(image, px, py);
+        }
+
+        private boolean canDiff(RenderStateSnapshot snapshot) {
+            return rowHashes.length == snapshot.rows() && snapshot.renderRows().size() == snapshot.rows();
+        }
+
+        private void rememberSnapshot(RenderStateSnapshot snapshot) {
+            if (rowHashes.length != snapshot.rows()) {
+                rowHashes = new long[snapshot.rows()];
+            }
+            for (RenderRow row : snapshot.renderRows()) {
+                rowHashes[row.row()] = rowHash(row);
+            }
+            lastCursor = CursorState.from(snapshot);
+        }
+
+        private long[] hashes(RenderStateSnapshot snapshot) {
+            long[] hashes = new long[snapshot.rows()];
+            for (RenderRow row : snapshot.renderRows()) {
+                hashes[row.row()] = rowHash(row);
+            }
+            return hashes;
+        }
+
+        private int inferScroll(long[] currentHashes) {
+            int rows = currentHashes.length;
+            int bestDelta = 0;
+            int bestScore = 0;
+            int maxDelta = Math.min(8, Math.max(0, rows - 1));
+            for (int delta = -maxDelta; delta <= maxDelta; delta++) {
+                if (delta == 0) {
+                    continue;
+                }
+                int score = 0;
+                int overlap = 0;
+                for (int row = 0; row < rows; row++) {
+                    int previous = row - delta;
+                    if (previous < 0 || previous >= rows) {
+                        continue;
+                    }
+                    overlap++;
+                    if (currentHashes[row] == rowHashes[previous]) {
+                        score++;
+                    }
+                }
+                if (score > bestScore || (score == bestScore && Math.abs(delta) < Math.abs(bestDelta))) {
+                    bestScore = score;
+                    bestDelta = delta;
+                }
+            }
+            int threshold = Math.max(3, (int) Math.ceil(rows * 0.55));
+            return bestScore >= threshold ? bestDelta : 0;
+        }
+
+        private int shiftedCursorRow(CursorState cursor, int scroll) {
+            int row = cursor.viewportRow();
+            if (row < 0) {
+                return -1;
+            }
+            row += scroll;
+            return row >= 0 && row < rowHashes.length ? row : -1;
+        }
+
+        private void scrollHashes(int rows) {
+            long[] shifted = new long[rowHashes.length];
+            for (int row = 0; row < shifted.length; row++) {
+                int previous = row - rows;
+                if (previous >= 0 && previous < rowHashes.length) {
+                    shifted[row] = rowHashes[previous];
+                }
+            }
+            rowHashes = shifted;
+        }
+
+        private void scrollContentPixels(int rows) {
+            int dy = rows * lineHeight();
+            int top = contentTop();
+            int contentHeight = rowHashes.length * lineHeight();
+            if (dy == 0 || Math.abs(dy) >= contentHeight) {
+                fillRect(0, top, width, contentHeight, argbPre(PANE_BACKGROUND));
+                return;
+            }
+
+            if (dy < 0) {
+                int srcY = top - dy;
+                int dstY = top;
+                int copyHeight = contentHeight + dy;
+                for (int y = 0; y < copyHeight; y++) {
+                    System.arraycopy(pixels, (srcY + y) * width, pixels, (dstY + y) * width, width);
+                }
+                fillRect(0, top + copyHeight, width, -dy, argbPre(PANE_BACKGROUND));
+            } else {
+                int srcY = top;
+                int dstY = top + dy;
+                int copyHeight = contentHeight - dy;
+                for (int y = copyHeight - 1; y >= 0; y--) {
+                    System.arraycopy(pixels, (srcY + y) * width, pixels, (dstY + y) * width, width);
+                }
+                fillRect(0, top, width, dy, argbPre(PANE_BACKGROUND));
+            }
+        }
+
+        private void paintSnapshot(RenderStateSnapshot snapshot) {
+            List<RenderRow> rows = snapshot.renderRows();
+            if (rows.isEmpty()) {
+                return;
+            }
+            int top = contentTop();
+            int contentBottom = top + snapshot.rows() * lineHeight();
+            fillRect(0, 0, width, top, argbPre(rowEdgeBackground(rows.get(0), true)));
+            fillRect(0, contentBottom, width, height - contentBottom, argbPre(rowEdgeBackground(rows.get(rows.size() - 1), true)));
+            for (RenderRow row : rows) {
+                paintRow(row);
+            }
+        }
+
+        private void paintRow(RenderRow row) {
+            int rowTop = contentTop() + (row.row() * lineHeight());
+            int rowHeight = lineHeight();
+            fillRect(0, rowTop, width, rowHeight, argbPre(PANE_BACKGROUND));
+            if (row.row() == 0) {
+                fillRect(0, 0, width, contentTop(), argbPre(rowEdgeBackground(row, true)));
+            }
+            if (row.row() == rowHashes.length - 1) {
+                int bottom = contentTop() + (rowHashes.length * lineHeight());
+                fillRect(0, bottom, width, height - bottom, argbPre(rowEdgeBackground(row, true)));
+            }
+            paintRowSidePadding(row, rowTop, rowHeight);
+            paintRowBackgrounds(row, rowTop, rowHeight);
+            paintRowText(row, rowTop);
+        }
+
+        private void paintRowSidePadding(RenderRow row, int rowTop, int rowHeight) {
+            List<RenderCell> cells = row.cells();
+            if (cells.isEmpty()) {
+                return;
+            }
+            int left = contentLeft();
+            int contentRight = left + (cells.size() * cellWidth());
+            fillRect(0, rowTop, left, rowHeight, argbPre(rowEdgeBackground(row, true)));
+            fillRect(contentRight, rowTop, width - contentRight, rowHeight, argbPre(rowEdgeBackground(row, false)));
+        }
+
+        private void paintRowBackgrounds(RenderRow row, int rowTop, int rowHeight) {
+            int cellWidth = cellWidth();
+            Color runBackground = null;
+            int runStartColumn = 0;
+            int previousColumn = -1;
+            for (RenderCell cell : row.cells()) {
+                if (cell.kittyPlaceholder().isPresent()) {
+                    flushBackground(runBackground, runStartColumn, previousColumn, rowTop, rowHeight);
+                    runBackground = null;
+                    previousColumn = -1;
+                    continue;
+                }
+
+                Color bg = cell.selected() ? SELECTED_BACKGROUND : cellBackgroundOverride(cell);
+                if (bg == null) {
+                    flushBackground(runBackground, runStartColumn, previousColumn, rowTop, rowHeight);
+                    runBackground = null;
+                    previousColumn = -1;
+                    continue;
+                }
+                if (runBackground == null || bg != runBackground || cell.column() != previousColumn + 1) {
+                    flushBackground(runBackground, runStartColumn, previousColumn, rowTop, rowHeight);
+                    runBackground = bg;
+                    runStartColumn = cell.column();
+                }
+                previousColumn = cell.column();
+            }
+            flushBackground(runBackground, runStartColumn, previousColumn, rowTop, rowHeight);
+        }
+
+        private void flushBackground(Color background, int startColumn, int endColumn, int rowTop, int rowHeight) {
+            if (background == null || endColumn < startColumn) {
+                return;
+            }
+            fillRect(contentLeft() + (startColumn * cellWidth()), rowTop,
+                    (endColumn - startColumn + 1) * cellWidth(), rowHeight, argbPre(background));
+        }
+
+        private void paintRowText(RenderRow row, int rowTop) {
+            int cellWidth = cellWidth();
+            int x0 = contentLeft();
+            for (RenderCell cell : row.cells()) {
+                if (cell.kittyPlaceholder().isPresent() || cell.codepoints().length == 0) {
+                    continue;
+                }
+                Glyph glyph = glyphs.glyph(cell.text());
+                int color = rgb(cellForegroundColor(cell));
+                blitGlyph(glyph, x0 + (cell.column() * cellWidth), rowTop, color);
+            }
+        }
+
+        private void blitGlyph(Glyph glyph, int x, int y, int rgb) {
+            int red = (rgb >> 16) & 0xff;
+            int green = (rgb >> 8) & 0xff;
+            int blue = rgb & 0xff;
+            for (int gy = 0; gy < glyph.height; gy++) {
+                int py = y + gy;
+                if (py < 0 || py >= height) {
+                    continue;
+                }
+                int rowOffset = py * width;
+                int glyphOffset = gy * glyph.width;
+                for (int gx = 0; gx < glyph.width; gx++) {
+                    int px = x + gx;
+                    if (px < 0 || px >= width) {
+                        continue;
+                    }
+                    int alpha = glyph.alpha[glyphOffset + gx] & 0xff;
+                    if (alpha == 0) {
+                        continue;
+                    }
+                    int index = rowOffset + px;
+                    pixels[index] = blendOpaque(pixels[index], red, green, blue, alpha);
+                }
+            }
+        }
+
+        private int blendOpaque(int dst, int red, int green, int blue, int alpha) {
+            int inv = 255 - alpha;
+            int dstRed = (dst >> 16) & 0xff;
+            int dstGreen = (dst >> 8) & 0xff;
+            int dstBlue = dst & 0xff;
+            int outRed = ((red * alpha) + (dstRed * inv) + 127) / 255;
+            int outGreen = ((green * alpha) + (dstGreen * inv) + 127) / 255;
+            int outBlue = ((blue * alpha) + (dstBlue * inv) + 127) / 255;
+            return 0xff000000 | (outRed << 16) | (outGreen << 8) | outBlue;
+        }
+
+        private void drawCursor(RenderStateSnapshot snapshot) {
+            if (!snapshot.cursorVisible() || !snapshot.cursorViewportHasValue()) {
+                return;
+            }
+            int x = contentLeft() + ((int) snapshot.cursorViewportX() * cellWidth());
+            int y = contentTop() + ((int) snapshot.cursorViewportY() * lineHeight());
+            int cw = cellWidth();
+            int lh = lineHeight();
+            RenderCursorStyle style = snapshot.cursorStyle();
+            if (style == RenderCursorStyle.BAR) {
+                fillRect(x, y + 2, 1, Math.max(1, lh - 4), argbPre(DEFAULT_FOREGROUND));
+            } else if (style == RenderCursorStyle.UNDERLINE) {
+                fillRect(x + 1, y + lh - 2, Math.max(1, cw - 2), 1, argbPre(DEFAULT_FOREGROUND));
+            } else if (style == RenderCursorStyle.BLOCK) {
+                fillRectAlpha(x, y + 1, Math.max(1, cw - 1), Math.max(1, lh - 2), CURSOR_FILL);
+            } else {
+                strokeRect(x, y + 1, Math.max(1, cw - 1), Math.max(1, lh - 2), argbPre(DEFAULT_FOREGROUND), 1);
+            }
+        }
+
+        private void drawBorder(boolean active) {
+            strokeRect(0, 0, width, height, argbPre(active ? ACTIVE_BORDER : INACTIVE_BORDER), active ? 2 : 1);
+        }
+
+        private void strokeRect(int x, int y, int w, int h, int color, int lineWidth) {
+            for (int i = 0; i < lineWidth; i++) {
+                fillRect(x + i, y + i, w - (2 * i), 1, color);
+                fillRect(x + i, y + h - 1 - i, w - (2 * i), 1, color);
+                fillRect(x + i, y + i, 1, h - (2 * i), color);
+                fillRect(x + w - 1 - i, y + i, 1, h - (2 * i), color);
+            }
+        }
+
+        private void fillRectAlpha(int x, int y, int w, int h, Color color) {
+            int alpha = (int) Math.round(color.getOpacity() * 255.0);
+            int rgb = rgb(color);
+            int red = (rgb >> 16) & 0xff;
+            int green = (rgb >> 8) & 0xff;
+            int blue = rgb & 0xff;
+            int x0 = Math.max(0, x);
+            int y0 = Math.max(0, y);
+            int x1 = Math.min(width, x + w);
+            int y1 = Math.min(height, y + h);
+            for (int py = y0; py < y1; py++) {
+                int offset = py * width;
+                for (int px = x0; px < x1; px++) {
+                    int index = offset + px;
+                    pixels[index] = blendOpaque(pixels[index], red, green, blue, alpha);
+                }
+            }
+        }
+
+        private void fillRect(int x, int y, int w, int h, int color) {
+            int x0 = Math.max(0, x);
+            int y0 = Math.max(0, y);
+            int x1 = Math.min(width, x + w);
+            int y1 = Math.min(height, y + h);
+            if (x0 >= x1 || y0 >= y1) {
+                return;
+            }
+            for (int py = y0; py < y1; py++) {
+                Arrays.fill(pixels, (py * width) + x0, (py * width) + x1, color);
+            }
+        }
+
+        private int contentLeft() {
+            return (int) Math.round(TerminalMetrics.PADDING);
+        }
+
+        private int contentTop() {
+            return (int) Math.round(TerminalMetrics.PADDING);
+        }
+
+        private int cellWidth() {
+            return Math.max(1, (int) Math.round(metrics.cellWidth()));
+        }
+
+        private int lineHeight() {
+            return Math.max(1, (int) Math.round(metrics.lineHeight()));
+        }
+    }
+
+    private final class GlyphCache {
+        private final javafx.scene.text.Font font;
+        private final int cellWidth;
+        private final int lineHeight;
+        private final double baseline;
+        private final Map<String, Glyph> glyphs = new HashMap<>();
+
+        private GlyphCache(javafx.scene.text.Font font, int cellWidth, int lineHeight, double baseline) {
+            this.font = font;
+            this.cellWidth = cellWidth;
+            this.lineHeight = lineHeight;
+            this.baseline = baseline;
+        }
+
+        private Glyph glyph(String text) {
+            return glyphs.computeIfAbsent(text, this::renderGlyph);
+        }
+
+        private Glyph renderGlyph(String value) {
+            Text measured = new Text(value);
+            measured.setFont(font);
+            int glyphWidth = Math.max(cellWidth, (int) Math.ceil(measured.getLayoutBounds().getWidth()) + 2);
+            Canvas canvas = new Canvas(glyphWidth, lineHeight);
+            GraphicsContext gc = canvas.getGraphicsContext2D();
+            gc.setFontSmoothingType(FontSmoothingType.GRAY);
+            gc.setFont(font);
+            gc.setFill(Color.WHITE);
+            gc.fillText(value, 0.0, baseline);
+
+            SnapshotParameters parameters = new SnapshotParameters();
+            parameters.setFill(Color.TRANSPARENT);
+            WritableImage snapshot = canvas.snapshot(parameters, null);
+            PixelReader reader = snapshot.getPixelReader();
+            byte[] alpha = new byte[glyphWidth * lineHeight];
+            for (int y = 0; y < lineHeight; y++) {
+                int offset = y * glyphWidth;
+                for (int x = 0; x < glyphWidth; x++) {
+                    alpha[offset + x] = (byte) ((reader.getArgb(x, y) >>> 24) & 0xff);
+                }
+            }
+            return new Glyph(glyphWidth, lineHeight, alpha);
+        }
+    }
+
+    private record Glyph(int width, int height, byte[] alpha) {
+    }
+
+    private record CursorState(boolean visible, boolean hasViewport, int column, int row, RenderCursorStyle style) {
+        private static CursorState none() {
+            return new CursorState(false, false, -1, -1, null);
+        }
+
+        private static CursorState from(RenderStateSnapshot snapshot) {
+            if (snapshot == null || !snapshot.cursorVisible() || !snapshot.cursorViewportHasValue()) {
+                return none();
+            }
+            return new CursorState(true, true, (int) snapshot.cursorViewportX(), (int) snapshot.cursorViewportY(), snapshot.cursorStyle());
+        }
+
+        private int viewportRow() {
+            return visible && hasViewport ? row : -1;
+        }
+    }
+
+    private static long rowHash(RenderRow row) {
+        long hash = 0xcbf29ce484222325L;
+        for (RenderCell cell : row.cells()) {
+            hash = mix(hash, cell.column());
+            hash = mix(hash, cell.inverse() ? 1 : 0);
+            hash = mix(hash, cell.selected() ? 1 : 0);
+            hash = mixColor(hash, cell.foreground().orElse(null));
+            hash = mixColor(hash, cell.background().orElse(null));
+            for (int codepoint : cell.codepoints()) {
+                hash = mix(hash, codepoint);
+            }
+            if (cell.kittyPlaceholder().isPresent()) {
+                KittyPlaceholder placeholder = cell.kittyPlaceholder().get();
+                hash = mix(hash, placeholder.imageId());
+                hash = mix(hash, placeholder.placementId());
+                hash = mix(hash, placeholder.sourceRow());
+                hash = mix(hash, placeholder.sourceColumn());
+            }
+        }
+        return hash;
+    }
+
+    private static long mixColor(long hash, RenderColor color) {
+        return color == null ? mix(hash, -1) : mix(hash, (color.red() << 16) | (color.green() << 8) | color.blue());
+    }
+
+    private static long mix(long hash, long value) {
+        hash ^= value;
+        return hash * 0x100000001b3L;
+    }
+
+    private static int rgb(Color color) {
+        int red = (int) Math.round(color.getRed() * 255.0);
+        int green = (int) Math.round(color.getGreen() * 255.0);
+        int blue = (int) Math.round(color.getBlue() * 255.0);
+        return (red << 16) | (green << 8) | blue;
+    }
+
+    private static int argbPre(Color color) {
+        int alpha = (int) Math.round(color.getOpacity() * 255.0);
+        int red = (int) Math.round(color.getRed() * alpha);
+        int green = (int) Math.round(color.getGreen() * alpha);
+        int blue = (int) Math.round(color.getBlue() * alpha);
+        return (alpha << 24) | (red << 16) | (green << 8) | blue;
     }
 
     // A kitty image is immutable for a given (id, number); re-transmitting under the same id

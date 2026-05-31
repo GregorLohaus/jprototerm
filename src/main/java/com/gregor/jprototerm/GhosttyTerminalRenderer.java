@@ -101,8 +101,10 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             if (dirty == DIRTY_FULL) {
                 software.paintFullOrShifted(gc, target.snapshotFull(), px, py, width, height, active);
             } else if (dirty == DIRTY_PARTIAL) {
-                if (snapshot != null && snapshot.renderRows().size() == snapshot.rows()) {
+                if (snapshot != null && software.isComplete(snapshot)) {
                     software.paintFullOrShifted(gc, snapshot, px, py, width, height, active);
+                } else if (!software.canPaintPartial(snapshot)) {
+                    software.paintFullOrShifted(gc, target.snapshotFull(), px, py, width, height, active);
                 } else {
                     software.paintDirty(gc, snapshot, px, py, width, height, active);
                 }
@@ -679,10 +681,16 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         private long[] rowHashes = new long[0];
         private CursorState lastCursor = CursorState.none();
         private GlyphCache glyphs;
+        private boolean fullFrameReady;
 
         private void invalidate() {
             rowHashes = new long[0];
             lastCursor = CursorState.none();
+            fullFrameReady = false;
+        }
+
+        private boolean canPaintPartial(RenderStateSnapshot snapshot) {
+            return fullFrameReady && snapshot != null && rowHashes.length == snapshot.rows();
         }
 
         private void paintFull(GraphicsContext gc, RenderStateSnapshot snapshot,
@@ -693,6 +701,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                 paintSnapshot(snapshot);
                 drawCursor(snapshot);
                 rememberSnapshot(snapshot);
+                fullFrameReady = isComplete(snapshot);
             } else {
                 invalidate();
             }
@@ -730,6 +739,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                 }
             }
             lastCursor = cursor;
+            fullFrameReady = true;
             drawCursor(snapshot);
             drawBorder(active);
             present(gc, px, py);
@@ -741,8 +751,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             if (snapshot == null) {
                 return;
             }
-            if (rowHashes.length != snapshot.rows()) {
-                paintFull(gc, snapshot, px, py, paneWidth, paneHeight, active);
+            if (!canPaintPartial(snapshot)) {
                 return;
             }
 
@@ -766,6 +775,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             }
             repaintCursorRow(snapshot, newCursorRow, repainted);
             lastCursor = cursor;
+            fullFrameReady = true;
             drawCursor(snapshot);
             drawBorder(active);
             present(gc, px, py);
@@ -825,7 +835,19 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         }
 
         private boolean canDiff(RenderStateSnapshot snapshot) {
-            return rowHashes.length == snapshot.rows() && snapshot.renderRows().size() == snapshot.rows();
+            return fullFrameReady && rowHashes.length == snapshot.rows() && isComplete(snapshot);
+        }
+
+        private boolean isComplete(RenderStateSnapshot snapshot) {
+            if (snapshot.renderRows().size() != snapshot.rows()) {
+                return false;
+            }
+            for (int i = 0; i < snapshot.renderRows().size(); i++) {
+                if (snapshot.renderRows().get(i).row() != i) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         private void rememberSnapshot(RenderStateSnapshot snapshot) {
@@ -856,13 +878,11 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                     continue;
                 }
                 int score = 0;
-                int overlap = 0;
                 for (int row = 0; row < rows; row++) {
                     int previous = row - delta;
                     if (previous < 0 || previous >= rows) {
                         continue;
                     }
-                    overlap++;
                     if (currentHashes[row] == rowHashes[previous]) {
                         score++;
                     }

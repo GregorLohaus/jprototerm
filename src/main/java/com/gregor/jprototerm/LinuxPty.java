@@ -97,6 +97,7 @@ public final class LinuxPty implements AutoCloseable {
 
     private final Arena arena = Arena.ofShared();
     private final MemorySegment readBuffer = arena.allocate(65536);
+    private final MemorySegment writeBuffer = arena.allocate(65536);
     private final Object writeLock = new Object();
     private final int masterFd;
     private final int pid;
@@ -186,17 +187,20 @@ public final class LinuxPty implements AutoCloseable {
             return;
         }
         synchronized (writeLock) {
-            try (Arena a = Arena.ofConfined()) {
-                MemorySegment buf = a.allocate(data.length);
-                MemorySegment.copy(data, 0, buf, ValueLayout.JAVA_BYTE, 0, data.length);
-                long offset = 0;
-                while (offset < data.length) {
-                    long n = callLong(WRITE, masterFd, buf.asSlice(offset), data.length - offset);
-                    if (n < 0) {
+            int offset = 0;
+            while (offset < data.length) {
+                int chunk = (int) Math.min(writeBuffer.byteSize(), data.length - offset);
+                MemorySegment.copy(data, offset, writeBuffer, ValueLayout.JAVA_BYTE, 0, chunk);
+
+                long written = 0;
+                while (written < chunk) {
+                    long n = callLong(WRITE, masterFd, writeBuffer.asSlice(written), chunk - written);
+                    if (n <= 0) {
                         throw new IllegalStateException("write to pty failed");
                     }
-                    offset += n;
+                    written += n;
                 }
+                offset += chunk;
             }
         }
     }

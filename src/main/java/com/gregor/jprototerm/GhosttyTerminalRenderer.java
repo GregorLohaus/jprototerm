@@ -39,6 +39,9 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     // The default cell background (used for cells with no explicit bg, and as the foreground
     // for reverse-video cells whose background is the terminal default).
     private static final Color PANE_BACKGROUND = Color.rgb(9, 10, 12);
+    private static final Color ACTIVE_BORDER = Color.rgb(87, 166, 255);
+    private static final Color INACTIVE_BORDER = Color.rgb(52, 57, 65);
+    private static final Color CURSOR_FILL = Color.rgb(225, 229, 235, 0.28);
 
     // A full-screen redraw asks for one Color per cell; most cells share a handful of colors,
     // so cache them by packed RGB instead of allocating a Color each time. Bounded so a
@@ -48,6 +51,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     private final TerminalMetrics metrics;
     // Decoded kitty images for this renderer's pane (kitty graphics state is per-terminal).
     private final Map<KittyImageKey, Image> kittyImageCache = new HashMap<>();
+    private final StringBuilder textRun = new StringBuilder(256);
 
     GhosttyTerminalRenderer(TerminalMetrics metrics) {
         this.metrics = metrics;
@@ -163,10 +167,17 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
 
         double contentBottom = top + snapshot.rows() * lineHeight;
         int lastRow = snapshot.rows() - 1;
+        List<RenderRow> rows = snapshot.renderRows();
+        boolean allRowsDirty = allRowsDirty(snapshot, rows);
+        if (allRowsDirty) {
+            gc.setFill(PANE_BACKGROUND);
+            gc.fillRect(px, py, pw, ph);
+        }
+
         boolean cursorRowDirty = false;
         double bandMin = Double.POSITIVE_INFINITY;
         double bandMax = Double.NEGATIVE_INFINITY;
-        for (RenderRow row : snapshot.renderRows()) {
+        for (RenderRow row : rows) {
             if (!row.dirty()) {
                 continue;
             }
@@ -174,8 +185,10 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             // would leave sub-pixel seams between rows.
             double y0 = Math.floor(top + (row.row() * lineHeight));
             double y1 = Math.ceil(top + ((row.row() + 1) * lineHeight));
-            gc.setFill(PANE_BACKGROUND);
-            gc.fillRect(px, y0, pw, y1 - y0);
+            if (!allRowsDirty) {
+                gc.setFill(PANE_BACKGROUND);
+                gc.fillRect(px, y0, pw, y1 - y0);
+            }
             paintSidePadding(gc, row, px, pw, left, cellWidth, y0, y1 - y0);
             drawRow(gc, row, left, top, baseline, cellWidth, lineHeight);
             bandMin = Math.min(bandMin, y0);
@@ -213,8 +226,21 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         gc.restore();
     }
 
+    private static boolean allRowsDirty(RenderStateSnapshot snapshot, List<RenderRow> rows) {
+        if (rows.size() != snapshot.rows()) {
+            return false;
+        }
+        for (int i = 0; i < rows.size(); i++) {
+            RenderRow row = rows.get(i);
+            if (!row.dirty() || row.row() != i) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private void drawBorder(GraphicsContext gc, double x, double y, double width, double height, boolean active) {
-        gc.setStroke(active ? Color.rgb(87, 166, 255) : Color.rgb(52, 57, 65));
+        gc.setStroke(active ? ACTIVE_BORDER : INACTIVE_BORDER);
         gc.setLineWidth(active ? 2.0 : 1.0);
         gc.strokeRect(x + 0.5, y + 0.5, width - 1.0, height - 1.0);
     }
@@ -266,7 +292,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         gc.fillRect(paneX, contentBottom, paneWidth, paneY + paneHeight - contentBottom);
     }
 
-    private static void drawRow(
+    private void drawRow(
             GraphicsContext gc,
             RenderRow row,
             double left,
@@ -275,45 +301,143 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             double cellWidth,
             double lineHeight
     ) {
+        drawRowBackgrounds(gc, row, left, top, cellWidth, lineHeight);
+        drawRowText(gc, row, left, baseline, cellWidth, lineHeight);
+    }
+
+    private static void drawRowBackgrounds(
+            GraphicsContext gc,
+            RenderRow row,
+            double left,
+            double top,
+            double cellWidth,
+            double lineHeight
+    ) {
+        Color runBackground = null;
+        int runStartColumn = 0;
+        int previousColumn = -1;
         for (RenderCell cell : row.cells()) {
             if (cell.kittyPlaceholder().isPresent()) {
+                flushBackgroundRun(gc, runBackground, left, top, cellWidth, lineHeight, row.row(), runStartColumn, previousColumn);
+                runBackground = null;
+                previousColumn = -1;
                 continue;
             }
 
-            double x = left + (cell.column() * cellWidth);
-            double cellTop = top + (row.row() * lineHeight);
-
-            // Resolve fg/bg (null bg = terminal default, painted by the pane background).
-            // Avoid Optional.map's allocation on this hot path.
-            var fgOpt = cell.foreground();
-            var bgOpt = cell.background();
-            Color fg = fgOpt.isPresent() ? toFxColor(fgOpt.get()) : DEFAULT_FOREGROUND;
-            Color bg = bgOpt.isPresent() ? toFxColor(bgOpt.get()) : null;
-
-            // Reverse video: ghostty does not bake inverse into the resolved colours, so we
-            // swap them here, falling back to the terminal defaults for whichever is unset.
-            if (cell.inverse()) {
-                Color swappedBg = fg;
-                fg = (bg != null) ? bg : PANE_BACKGROUND;
-                bg = swappedBg;
-            }
-
-            if (bg != null) {
-                gc.setFill(bg);
-                gc.fillRect(x, cellTop, cellWidth, lineHeight);
-            }
-            if (cell.selected()) {
-                gc.setFill(SELECTED_BACKGROUND);
-                gc.fillRect(x, cellTop, cellWidth, lineHeight);
-            }
-            if (cell.codepoints().length == 0) {
+            Color bg = cell.selected() ? SELECTED_BACKGROUND : cellBackgroundOverride(cell);
+            if (bg == null) {
+                flushBackgroundRun(gc, runBackground, left, top, cellWidth, lineHeight, row.row(), runStartColumn, previousColumn);
+                runBackground = null;
+                previousColumn = -1;
                 continue;
             }
 
-            double y = baseline + (row.row() * lineHeight);
-            gc.setFill(fg);
-            gc.fillText(cell.text(), x, y);
+            if (runBackground == null || bg != runBackground || cell.column() != previousColumn + 1) {
+                flushBackgroundRun(gc, runBackground, left, top, cellWidth, lineHeight, row.row(), runStartColumn, previousColumn);
+                runBackground = bg;
+                runStartColumn = cell.column();
+            }
+            previousColumn = cell.column();
         }
+        flushBackgroundRun(gc, runBackground, left, top, cellWidth, lineHeight, row.row(), runStartColumn, previousColumn);
+    }
+
+    private static void flushBackgroundRun(
+            GraphicsContext gc,
+            Color background,
+            double left,
+            double top,
+            double cellWidth,
+            double lineHeight,
+            int row,
+            int startColumn,
+            int endColumn
+    ) {
+        if (background == null || endColumn < startColumn) {
+            return;
+        }
+        gc.setFill(background);
+        gc.fillRect(
+                left + (startColumn * cellWidth),
+                top + (row * lineHeight),
+                (endColumn - startColumn + 1) * cellWidth,
+                lineHeight);
+    }
+
+    private void drawRowText(
+            GraphicsContext gc,
+            RenderRow row,
+            double left,
+            double baseline,
+            double cellWidth,
+            double lineHeight
+    ) {
+        StringBuilder run = textRun;
+        run.setLength(0);
+        Color runForeground = null;
+        int runStartColumn = 0;
+        int previousColumn = -1;
+
+        for (RenderCell cell : row.cells()) {
+            if (cell.kittyPlaceholder().isPresent() || cell.codepoints().length == 0) {
+                flushTextRun(gc, run, runForeground, left, baseline, cellWidth, lineHeight, row.row(), runStartColumn);
+                runForeground = null;
+                previousColumn = -1;
+                continue;
+            }
+
+            Color fg = cellForegroundColor(cell);
+            if (run.length() == 0 || fg != runForeground || cell.column() != previousColumn + 1) {
+                flushTextRun(gc, run, runForeground, left, baseline, cellWidth, lineHeight, row.row(), runStartColumn);
+                runForeground = fg;
+                runStartColumn = cell.column();
+            }
+            run.append(cell.text());
+            previousColumn = cell.column();
+        }
+        flushTextRun(gc, run, runForeground, left, baseline, cellWidth, lineHeight, row.row(), runStartColumn);
+    }
+
+    private static void flushTextRun(
+            GraphicsContext gc,
+            StringBuilder run,
+            Color foreground,
+            double left,
+            double baseline,
+            double cellWidth,
+            double lineHeight,
+            int row,
+            int startColumn
+    ) {
+        if (run.length() == 0) {
+            return;
+        }
+        gc.setFill(foreground);
+        gc.fillText(run.toString(), left + (startColumn * cellWidth), baseline + (row * lineHeight));
+        run.setLength(0);
+    }
+
+    // Background override for a cell: null means the pane default background already covers it.
+    private static Color cellBackgroundOverride(RenderCell cell) {
+        if (cell.inverse()) {
+            var fg = cell.foreground();
+            return fg.isPresent() ? toFxColor(fg.get()) : DEFAULT_FOREGROUND;
+        }
+        var bgOpt = cell.background();
+        Color bg = bgOpt.isPresent() ? toFxColor(bgOpt.get()) : null;
+        return bg;
+    }
+
+    private static Color cellForegroundColor(RenderCell cell) {
+        var fgOpt = cell.foreground();
+        var bgOpt = cell.background();
+        Color fg = fgOpt.isPresent() ? toFxColor(fgOpt.get()) : DEFAULT_FOREGROUND;
+        Color bg = bgOpt.isPresent() ? toFxColor(bgOpt.get()) : null;
+
+        if (cell.inverse()) {
+            return (bg != null) ? bg : PANE_BACKGROUND;
+        }
+        return fg;
     }
 
     private static Color toFxColor(RenderColor color) {
@@ -337,8 +461,8 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
 
         double x = left + (snapshot.cursorViewportX() * cellWidth);
         double y = top + (snapshot.cursorViewportY() * lineHeight);
-        gc.setStroke(Color.rgb(225, 229, 235));
-        gc.setFill(Color.rgb(225, 229, 235, 0.28));
+        gc.setStroke(DEFAULT_FOREGROUND);
+        gc.setFill(CURSOR_FILL);
         gc.setLineWidth(1.5);
 
         RenderCursorStyle style = snapshot.cursorStyle();

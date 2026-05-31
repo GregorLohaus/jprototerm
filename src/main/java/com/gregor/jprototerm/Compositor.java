@@ -384,7 +384,10 @@ public final class Compositor {
             double ey = localY(event.getY(), pane, target);
             KeyModifiers modifiers = modifiers(event);
             for (int i = 0; i < rows; i++) {
-                sent |= send(pane, target, MouseInput.press(wheelButton, ex, ey, modifiers), mouseButtonPressed, event);
+                if (!send(pane, target, MouseInput.press(wheelButton, ex, ey, modifiers), mouseButtonPressed, event)) {
+                    break;
+                }
+                sent = true;
             }
         }
         if (!sent) {

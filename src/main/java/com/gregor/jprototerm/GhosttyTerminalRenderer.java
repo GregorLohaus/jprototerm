@@ -12,6 +12,7 @@ import dev.jlibghostty.RenderColor;
 import dev.jlibghostty.RenderCursorStyle;
 import dev.jlibghostty.RenderRow;
 import dev.jlibghostty.RenderStateSnapshot;
+import javafx.geometry.Rectangle2D;
 import javafx.scene.SnapshotParameters;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
@@ -675,10 +676,40 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         private long[] rowHashes = new long[0];
         private CursorState lastCursor = CursorState.none();
         private GlyphCache glyphs;
+        // Half-open [min, max) vertical span of buffer rows written since the last present, so
+        // present() can upload only that band to the GPU instead of the whole pane texture.
+        private int dirtyMinY = Integer.MAX_VALUE;
+        private int dirtyMaxY = Integer.MIN_VALUE;
 
         private void invalidate() {
             rowHashes = new long[0];
             lastCursor = CursorState.none();
+        }
+
+        // Record that buffer rows [y0, y1) changed; clamped to the buffer in dirtyRegion().
+        private void markDirtyRows(int y0, int y1) {
+            if (y0 < dirtyMinY) {
+                dirtyMinY = y0;
+            }
+            if (y1 > dirtyMaxY) {
+                dirtyMaxY = y1;
+            }
+        }
+
+        private void resetDirty() {
+            dirtyMinY = Integer.MAX_VALUE;
+            dirtyMaxY = Integer.MIN_VALUE;
+        }
+
+        // The region to hand PixelBuffer.updateBuffer: a full-width band covering the rows
+        // written this frame (clamped to the buffer), or EMPTY when nothing changed.
+        private Rectangle2D dirtyRegion() {
+            int y0 = Math.max(0, dirtyMinY);
+            int y1 = Math.min(height, dirtyMaxY);
+            if (y0 >= y1) {
+                return Rectangle2D.EMPTY;
+            }
+            return new Rectangle2D(0, y0, width, y1 - y0);
         }
 
         private void paintFull(GraphicsContext gc, RenderStateSnapshot snapshot,
@@ -835,7 +866,11 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         }
 
         private void present(GraphicsContext gc, double px, double py) {
-            pixelBuffer.updateBuffer(ignored -> null);
+            // Only re-upload the rows that actually changed; the unchanged remainder of the pane
+            // texture is already correct on the GPU from the previous frame.
+            Rectangle2D dirty = dirtyRegion();
+            resetDirty();
+            pixelBuffer.updateBuffer(ignored -> dirty);
             gc.drawImage(image, px, py);
         }
 
@@ -915,6 +950,9 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             int dy = rows * lineHeight();
             int top = contentTop();
             int contentHeight = rowHashes.length * lineHeight();
+            // The whole content region shifts; the arraycopy below moves pixels that the
+            // per-strip fillRect calls don't touch, so mark the full content band for upload.
+            markDirtyRows(top, top + contentHeight);
             if (dy == 0 || Math.abs(dy) >= contentHeight) {
                 fillRect(0, top, width, contentHeight, argbPre(PANE_BACKGROUND));
                 return;
@@ -1035,26 +1073,28 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             int red = (rgb >> 16) & 0xff;
             int green = (rgb >> 8) & 0xff;
             int blue = rgb & 0xff;
-            for (int gy = 0; gy < glyph.height; gy++) {
-                int py = y + gy;
-                if (py < 0 || py >= height) {
-                    continue;
-                }
-                int rowOffset = py * width;
+            // Clamp the glyph rectangle to the buffer once, so the inner loops carry no
+            // per-pixel bounds check (this is the hottest pixel loop on a text repaint).
+            int gyStart = Math.max(0, -y);
+            int gyEnd = Math.min(glyph.height, height - y);
+            int gxStart = Math.max(0, -x);
+            int gxEnd = Math.min(glyph.width, width - x);
+            if (gyStart >= gyEnd || gxStart >= gxEnd) {
+                return;
+            }
+            for (int gy = gyStart; gy < gyEnd; gy++) {
+                int rowOffset = (y + gy) * width;
                 int glyphOffset = gy * glyph.width;
-                for (int gx = 0; gx < glyph.width; gx++) {
-                    int px = x + gx;
-                    if (px < 0 || px >= width) {
-                        continue;
-                    }
+                for (int gx = gxStart; gx < gxEnd; gx++) {
                     int alpha = glyph.alpha[glyphOffset + gx] & 0xff;
                     if (alpha == 0) {
                         continue;
                     }
-                    int index = rowOffset + px;
+                    int index = rowOffset + x + gx;
                     pixels[index] = blendOpaque(pixels[index], red, green, blue, alpha);
                 }
             }
+            markDirtyRows(y + gyStart, y + gyEnd);
         }
 
         private int blendOpaque(int dst, int red, int green, int blue, int alpha) {
@@ -1093,11 +1133,16 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         }
 
         private void strokeRect(int x, int y, int w, int h, int color, int lineWidth) {
+            // The border is redrawn every frame to restore the side edges over the rows we
+            // repaint, but its pixels never change between incremental frames. Write it without
+            // marking the dirty band: the segments inside a repainted row's band are already
+            // covered by that band (and so re-uploaded), and the segments outside it are
+            // identical to what is already on the GPU, so they need no upload.
             for (int i = 0; i < lineWidth; i++) {
-                fillRect(x + i, y + i, w - (2 * i), 1, color);
-                fillRect(x + i, y + h - 1 - i, w - (2 * i), 1, color);
-                fillRect(x + i, y + i, 1, h - (2 * i), color);
-                fillRect(x + w - 1 - i, y + i, 1, h - (2 * i), color);
+                fillRectRaw(x + i, y + i, w - (2 * i), 1, color);
+                fillRectRaw(x + i, y + h - 1 - i, w - (2 * i), 1, color);
+                fillRectRaw(x + i, y + i, 1, h - (2 * i), color);
+                fillRectRaw(x + w - 1 - i, y + i, 1, h - (2 * i), color);
             }
         }
 
@@ -1118,19 +1163,30 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                     pixels[index] = blendOpaque(pixels[index], red, green, blue, alpha);
                 }
             }
+            markDirtyRows(y0, y1);
         }
 
         private void fillRect(int x, int y, int w, int h, int color) {
+            int y0 = Math.max(0, y);
+            int y1 = Math.min(height, y + h);
+            if (fillRectRaw(x, y, w, h, color)) {
+                markDirtyRows(y0, y1);
+            }
+        }
+
+        // Raw fill with no dirty-band tracking; returns whether any pixels were written.
+        private boolean fillRectRaw(int x, int y, int w, int h, int color) {
             int x0 = Math.max(0, x);
             int y0 = Math.max(0, y);
             int x1 = Math.min(width, x + w);
             int y1 = Math.min(height, y + h);
             if (x0 >= x1 || y0 >= y1) {
-                return;
+                return false;
             }
             for (int py = y0; py < y1; py++) {
                 Arrays.fill(pixels, (py * width) + x0, (py * width) + x1, color);
             }
+            return true;
         }
 
         private int contentLeft() {

@@ -51,6 +51,8 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     private final TerminalMetrics metrics;
     // Decoded kitty images for this renderer's pane (kitty graphics state is per-terminal).
     private final Map<KittyImageKey, Image> kittyImageCache = new HashMap<>();
+    private long[] rowHashes = new long[0];
+    private CursorState lastCursor = CursorState.none();
 
     GhosttyTerminalRenderer(TerminalMetrics metrics) {
         this.metrics = metrics;
@@ -64,8 +66,10 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         double height = target.height();
         gc.save();
         clip(gc, px, py, width, height, target.clip());
-        drawContent(gc, target, target.snapshotFull(), px, py, width, height, active,
+        RenderStateSnapshot snapshot = target.snapshotFull();
+        drawContent(gc, target, snapshot, px, py, width, height, active,
                 target.kittyEnabled() && hasKittyGraphics(target));
+        rememberSnapshot(snapshot);
         gc.restore();
     }
 
@@ -79,18 +83,104 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         clip(gc, px, py, width, height, target.clip());
         if (target.kittyEnabled() && hasKittyGraphics(target)) {
             // Kitty placements can move without a per-row dirty flag, so always redraw whole.
-            drawContent(gc, target, target.snapshotFull(), px, py, width, height, active, true);
+            RenderStateSnapshot snapshot = target.snapshotFull();
+            drawContent(gc, target, snapshot, px, py, width, height, active, true);
+            rememberSnapshot(snapshot);
         } else {
             RenderStateSnapshot snapshot = target.snapshot();
             int dirty = snapshot == null ? DIRTY_FULL : snapshot.dirty();
             if (dirty == DIRTY_FULL) {
-                drawContent(gc, target, snapshot, px, py, width, height, active, false);
+                if (!drawChangedRows(gc, snapshot, px, py, width, height, active)) {
+                    RenderStateSnapshot fullSnapshot = target.snapshotFull();
+                    drawContent(gc, target, fullSnapshot, px, py, width, height, active, false);
+                    rememberSnapshot(fullSnapshot);
+                }
             } else if (dirty == DIRTY_PARTIAL) {
                 drawDirtyRows(gc, snapshot, px, py, width, height, active);
             }
             // dirty == FALSE: nothing visible changed.
         }
         gc.restore();
+    }
+
+    // Some TUIs repaint the whole viewport for small logical changes. When ghostty gives us
+    // a full snapshot, compare row content with what we last painted and only redraw rows
+    // whose cells changed, plus old/new cursor rows because the cursor is an overlay.
+    private boolean drawChangedRows(
+            GraphicsContext gc,
+            RenderStateSnapshot snapshot,
+            double px,
+            double py,
+            double pw,
+            double ph,
+            boolean active
+    ) {
+        if (snapshot == null || rowHashes.length != snapshot.rows() || snapshot.renderRows().size() != snapshot.rows()) {
+            return false;
+        }
+
+        double cellWidth = metrics.cellWidth();
+        double lineHeight = metrics.lineHeight();
+        gc.setFontSmoothingType(FontSmoothingType.LCD);
+        gc.setFont(metrics.font());
+        double left = px + TerminalMetrics.PADDING;
+        double top = py + TerminalMetrics.PADDING;
+        double baseline = top + metrics.baselineOffset();
+        double contentBottom = top + snapshot.rows() * lineHeight;
+        int lastRow = snapshot.rows() - 1;
+
+        CursorState cursor = CursorState.from(snapshot);
+        long oldCursorRow = lastCursor.viewportRow();
+        long newCursorRow = cursor.viewportRow();
+        boolean cursorChanged = !cursor.equals(lastCursor);
+        double bandMin = Double.POSITIVE_INFINITY;
+        double bandMax = Double.NEGATIVE_INFINITY;
+
+        for (RenderRow row : snapshot.renderRows()) {
+            int rowIndex = row.row();
+            if (rowIndex < 0 || rowIndex >= rowHashes.length) {
+                return false;
+            }
+
+            long hash = rowHash(row);
+            boolean repaint = hash != rowHashes[rowIndex]
+                    || (cursorChanged && (rowIndex == oldCursorRow || rowIndex == newCursorRow));
+            if (!repaint) {
+                continue;
+            }
+
+            double y0 = Math.floor(top + (rowIndex * lineHeight));
+            double y1 = Math.ceil(top + ((rowIndex + 1) * lineHeight));
+            gc.setFill(PANE_BACKGROUND);
+            gc.fillRect(px, y0, pw, y1 - y0);
+            paintSidePadding(gc, row, px, pw, left, cellWidth, y0, y1 - y0);
+            drawRow(gc, row, left, top, baseline, cellWidth, lineHeight);
+            rowHashes[rowIndex] = hash;
+            bandMin = Math.min(bandMin, y0);
+            bandMax = Math.max(bandMax, y1);
+
+            if (rowIndex == 0) {
+                gc.setFill(rowEdgeBackground(row, true));
+                gc.fillRect(px, py, pw, top - py);
+                bandMin = Math.min(bandMin, py);
+            }
+            if (rowIndex == lastRow) {
+                gc.setFill(rowEdgeBackground(row, true));
+                gc.fillRect(px, contentBottom, pw, py + ph - contentBottom);
+                bandMax = Math.max(bandMax, py + ph);
+            }
+        }
+
+        lastCursor = cursor;
+        if (bandMin > bandMax) {
+            return true;
+        }
+        drawCursor(gc, snapshot, left, top, cellWidth, lineHeight);
+        gc.save();
+        clipRect(gc, px, bandMin, pw, bandMax - bandMin);
+        drawBorder(gc, px, py, pw, ph, active);
+        gc.restore();
+        return true;
     }
 
     // Full content render: background, border, all rows, cursor, and (when enabled) kitty
@@ -190,6 +280,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             }
             paintSidePadding(gc, row, px, pw, left, cellWidth, y0, y1 - y0);
             drawRow(gc, row, left, top, baseline, cellWidth, lineHeight);
+            rememberRow(row);
             bandMin = Math.min(bandMin, y0);
             bandMax = Math.max(bandMax, y1);
             // Edge rows also own the top/bottom padding strip; repaint it and extend the
@@ -217,6 +308,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         if (cursorRowDirty) {
             drawCursor(gc, snapshot, left, top, cellWidth, lineHeight);
         }
+        lastCursor = CursorState.from(snapshot);
         // Repainting rows clears the side borders within the band; restore just those
         // segments, clipped to the band so we don't redraw the whole outline.
         gc.save();
@@ -242,6 +334,62 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         gc.setStroke(active ? ACTIVE_BORDER : INACTIVE_BORDER);
         gc.setLineWidth(active ? 2.0 : 1.0);
         gc.strokeRect(x + 0.5, y + 0.5, width - 1.0, height - 1.0);
+    }
+
+    private void rememberSnapshot(RenderStateSnapshot snapshot) {
+        if (snapshot == null) {
+            rowHashes = new long[0];
+            lastCursor = CursorState.none();
+            return;
+        }
+        if (rowHashes.length != snapshot.rows()) {
+            rowHashes = new long[snapshot.rows()];
+        }
+        for (RenderRow row : snapshot.renderRows()) {
+            rememberRow(row);
+        }
+        lastCursor = CursorState.from(snapshot);
+    }
+
+    private void rememberRow(RenderRow row) {
+        if (row.row() >= 0 && row.row() < rowHashes.length) {
+            rowHashes[row.row()] = rowHash(row);
+        }
+    }
+
+    private static long rowHash(RenderRow row) {
+        long hash = 0xcbf29ce484222325L;
+        hash = mix(hash, row.row());
+        for (RenderCell cell : row.cells()) {
+            hash = mix(hash, cell.column());
+            hash = mix(hash, cell.inverse() ? 1 : 0);
+            hash = mix(hash, cell.selected() ? 1 : 0);
+            hash = mixColor(hash, cell.foreground().orElse(null));
+            hash = mixColor(hash, cell.background().orElse(null));
+            for (int codepoint : cell.codepoints()) {
+                hash = mix(hash, codepoint);
+            }
+            if (cell.kittyPlaceholder().isPresent()) {
+                KittyPlaceholder placeholder = cell.kittyPlaceholder().get();
+                hash = mix(hash, placeholder.imageId());
+                hash = mix(hash, placeholder.placementId());
+                hash = mix(hash, placeholder.sourceRow());
+                hash = mix(hash, placeholder.sourceColumn());
+            }
+        }
+        return hash;
+    }
+
+    private static long mixColor(long hash, RenderColor color) {
+        if (color == null) {
+            return mix(hash, -1);
+        }
+        return mix(hash, (color.red() << 16) | (color.green() << 8) | color.blue());
+    }
+
+    private static long mix(long hash, long value) {
+        hash ^= value;
+        return hash * 0x100000001b3L;
     }
 
     // Effective background colour of a cell as it is drawn (reverse video swaps fg/bg, an
@@ -673,6 +821,29 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     }
 
     private record SourceRect(double x, double y, double width, double height) {
+    }
+
+    private record CursorState(boolean visible, boolean hasViewport, long viewportX, long viewportY, RenderCursorStyle style) {
+        private static CursorState none() {
+            return new CursorState(false, false, -1, -1, null);
+        }
+
+        private static CursorState from(RenderStateSnapshot snapshot) {
+            if (snapshot == null) {
+                return none();
+            }
+            boolean hasViewport = snapshot.cursorViewportHasValue();
+            return new CursorState(
+                    snapshot.cursorVisible(),
+                    hasViewport,
+                    hasViewport ? snapshot.cursorViewportX() : -1,
+                    hasViewport ? snapshot.cursorViewportY() : -1,
+                    snapshot.cursorStyle());
+        }
+
+        private long viewportRow() {
+            return visible && hasViewport ? viewportY : -1;
+        }
     }
 
     private static final class KittyPlaceholderBounds {

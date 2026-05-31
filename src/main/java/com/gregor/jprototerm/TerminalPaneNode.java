@@ -253,21 +253,29 @@ final class TerminalPaneNode extends Region {
     }
 
     private ShiftPlan detectShift(RenderStateSnapshot snapshot, List<RenderRow> changedRows) {
+        int rowCount = snapshot.rows();
+        int changedCount = changedRows.size();
+        // The new-content hash of each changed row is invariant across the delta scan below,
+        // so compute it once here instead of re-hashing the whole row for every candidate delta.
+        long[] changedHashes = new long[changedCount];
+        for (int i = 0; i < changedCount; i++) {
+            changedHashes[i] = rowFingerprint(changedRows.get(i));
+        }
+
         int bestDelta = 0;
         int bestScore = 0;
-        int rowCount = snapshot.rows();
         for (int delta = -rowCount + 1; delta < rowCount; delta++) {
             if (delta == 0) {
                 continue;
             }
             int score = 0;
-            for (RenderRow row : changedRows) {
-                int sourceRow = row.row() + delta;
+            for (int i = 0; i < changedCount; i++) {
+                int sourceRow = changedRows.get(i).row() + delta;
                 if (sourceRow < 0 || sourceRow >= rowCount || !rows.containsKey(sourceRow)) {
                     continue;
                 }
                 Long previous = rowFingerprints.get(sourceRow);
-                if (previous != null && previous == rowFingerprint(row)) {
+                if (previous != null && previous == changedHashes[i]) {
                     score++;
                 }
             }
@@ -284,13 +292,14 @@ final class TerminalPaneNode extends Region {
 
         List<RowMove> moves = new ArrayList<>(bestScore);
         Set<Integer> targetRows = new HashSet<>();
-        for (RenderRow row : changedRows) {
+        for (int i = 0; i < changedCount; i++) {
+            RenderRow row = changedRows.get(i);
             int sourceRow = row.row() + bestDelta;
             if (sourceRow < 0 || sourceRow >= rowCount || !rows.containsKey(sourceRow)) {
                 continue;
             }
             Long previous = rowFingerprints.get(sourceRow);
-            if (previous != null && previous == rowFingerprint(row)) {
+            if (previous != null && previous == changedHashes[i]) {
                 moves.add(new RowMove(sourceRow, row.row()));
                 targetRows.add(row.row());
             }

@@ -259,7 +259,7 @@ public final class Compositor {
     }
 
     private TerminalPaneNode createNode(TerminalPane pane) {
-        TerminalPaneNode node = new TerminalPaneNode(pane);
+        TerminalPaneNode node = new TerminalPaneNode(pane, metrics);
         node.setOnMousePressed(event -> handleMousePressed(pane, event));
         node.setOnMouseReleased(event -> handleMouseReleased(pane, event));
         node.setOnMouseDragged(event -> handleMouseDragged(pane, event));

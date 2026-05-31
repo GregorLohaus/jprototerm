@@ -198,7 +198,7 @@ final class TerminalPaneNode extends Region {
             }
             TerminalRowNode node = rowNode(row.row());
             long fingerprint = rowFingerprint(row);
-            node.render(row);
+            node.renderChanged(row);
             rowFingerprints.put(row.row(), fingerprint);
         }
         for (RenderRow row : changedRows) {
@@ -642,19 +642,27 @@ final class TerminalPaneNode extends Region {
         long hash = 0xcbf29ce484222325L;
         hash = mix(hash, row.cells().size());
         for (RenderCell cell : row.cells()) {
-            hash = mix(hash, cell.column());
-            hash = mix(hash, cell.inverse() ? 1 : 0);
-            hash = mix(hash, cell.selected() ? 1 : 0);
-            hash = mix(hash, colorFingerprint(cell.foreground().orElse(null)));
-            hash = mix(hash, colorFingerprint(cell.background().orElse(null)));
-            hash = mix(hash, cell.text().hashCode());
-            if (cell.kittyPlaceholder().isPresent()) {
-                KittyPlaceholder placeholder = cell.kittyPlaceholder().get();
-                hash = mix(hash, placeholder.imageId());
-                hash = mix(hash, placeholder.placementId());
-                hash = mix(hash, placeholder.sourceRow());
-                hash = mix(hash, placeholder.sourceColumn());
-            }
+            hash = mix(hash, cellFingerprint(cell));
+        }
+        return hash;
+    }
+
+    private static long cellFingerprint(RenderCell cell) {
+        long hash = 0xcbf29ce484222325L;
+        hash = mix(hash, cell.column());
+        hash = mix(hash, cell.inverse() ? 1 : 0);
+        hash = mix(hash, cell.selected() ? 1 : 0);
+        hash = mix(hash, colorFingerprint(cell.foreground().orElse(null)));
+        hash = mix(hash, colorFingerprint(cell.background().orElse(null)));
+        for (int codepoint : cell.codepoints()) {
+            hash = mix(hash, codepoint);
+        }
+        if (cell.kittyPlaceholder().isPresent()) {
+            KittyPlaceholder placeholder = cell.kittyPlaceholder().get();
+            hash = mix(hash, placeholder.imageId());
+            hash = mix(hash, placeholder.placementId());
+            hash = mix(hash, placeholder.sourceRow());
+            hash = mix(hash, placeholder.sourceColumn());
         }
         return hash;
     }
@@ -674,6 +682,7 @@ final class TerminalPaneNode extends Region {
     private static final class TerminalRowNode extends Region {
         private final TerminalMetrics metrics;
         private final Canvas canvas = new Canvas();
+        private long[] cellFingerprints = new long[0];
 
         private TerminalRowNode(TerminalMetrics metrics) {
             this.metrics = metrics;
@@ -681,36 +690,123 @@ final class TerminalPaneNode extends Region {
         }
 
         private void render(RenderRow row) {
+            prepareCanvas(row);
+
+            GraphicsContext gc = canvas.getGraphicsContext2D();
+            gc.clearRect(0.0, 0.0, canvas.getWidth(), canvas.getHeight());
+            gc.setFontSmoothingType(FontSmoothingType.LCD);
+            gc.setFont(metrics.font());
+
+            paintSidePadding(gc, row, canvas.getWidth(), canvas.getHeight());
+            drawRow(gc, row, rowTop(row), metrics.cellWidth(), metrics.lineHeight());
+            cellFingerprints = cellFingerprints(row);
+        }
+
+        private void renderChanged(RenderRow row) {
+            double oldWidth = canvas.getWidth();
+            double oldHeight = canvas.getHeight();
+            prepareCanvas(row);
+            long[] nextFingerprints = cellFingerprints(row);
+            if (cellFingerprints.length != nextFingerprints.length
+                    || oldWidth != canvas.getWidth()
+                    || oldHeight != canvas.getHeight()) {
+                render(row);
+                return;
+            }
+
+            GraphicsContext gc = canvas.getGraphicsContext2D();
+            gc.setFontSmoothingType(FontSmoothingType.LCD);
+            gc.setFont(metrics.font());
+
+            int runStart = -1;
+            int runEnd = -1;
+            for (int column = 0; column < nextFingerprints.length; column++) {
+                if (cellFingerprints[column] == nextFingerprints[column]) {
+                    continue;
+                }
+
+                int start = Math.max(0, column - 1);
+                int end = Math.min(nextFingerprints.length - 1, column + 1);
+                if (runStart < 0) {
+                    runStart = start;
+                    runEnd = end;
+                } else if (start <= runEnd + 1) {
+                    runEnd = Math.max(runEnd, end);
+                } else {
+                    repaintColumns(gc, row, runStart, runEnd);
+                    runStart = start;
+                    runEnd = end;
+                }
+            }
+            if (runStart >= 0) {
+                repaintColumns(gc, row, runStart, runEnd);
+            }
+            cellFingerprints = nextFingerprints;
+        }
+
+        private void prepareCanvas(RenderRow row) {
             double paneWidth = ((Region) getParent()).getWidth();
-            double top = TerminalMetrics.PADDING;
-            double cellWidth = metrics.cellWidth();
-            double lineHeight = metrics.lineHeight();
-            double rowTop = Math.floor(top + row.row() * lineHeight);
-            double rowBottom = Math.ceil(top + (row.row() + 1) * lineHeight);
+            double rowTop = rowTop(row);
+            double rowBottom = rowBottom(row);
             double rowHeight = Math.max(1.0, rowBottom - rowTop);
             resizeRelocate(0.0, rowTop, paneWidth, rowHeight);
             canvas.setWidth(Math.max(0.0, paneWidth));
             canvas.setHeight(rowHeight);
-
-            GraphicsContext gc = canvas.getGraphicsContext2D();
-            gc.clearRect(0.0, 0.0, paneWidth, rowHeight);
-            gc.setFontSmoothingType(FontSmoothingType.LCD);
-            gc.setFont(metrics.font());
-
-            paintSidePadding(gc, row, paneWidth, rowHeight);
-            drawRow(gc, row, rowTop, cellWidth, lineHeight);
         }
 
         private void moveToRow(int row) {
             double paneWidth = ((Region) getParent()).getWidth();
-            double top = TerminalMetrics.PADDING;
-            double lineHeight = metrics.lineHeight();
-            double rowTop = Math.floor(top + row * lineHeight);
-            double rowBottom = Math.ceil(top + (row + 1) * lineHeight);
+            double rowTop = rowTop(row);
+            double rowBottom = rowBottom(row);
             double rowHeight = Math.max(1.0, rowBottom - rowTop);
             resizeRelocate(0.0, rowTop, paneWidth, rowHeight);
             canvas.setWidth(Math.max(0.0, paneWidth));
             canvas.setHeight(rowHeight);
+        }
+
+        private double rowTop(RenderRow row) {
+            return rowTop(row.row());
+        }
+
+        private double rowTop(int row) {
+            return Math.floor(TerminalMetrics.PADDING + row * metrics.lineHeight());
+        }
+
+        private double rowBottom(RenderRow row) {
+            return rowBottom(row.row());
+        }
+
+        private double rowBottom(int row) {
+            return Math.ceil(TerminalMetrics.PADDING + (row + 1) * metrics.lineHeight());
+        }
+
+        private void repaintColumns(GraphicsContext gc, RenderRow row, int startColumn, int endColumn) {
+            if (endColumn < startColumn) {
+                return;
+            }
+
+            double cellWidth = metrics.cellWidth();
+            double lineHeight = metrics.lineHeight();
+            double rowTop = rowTop(row);
+            double contentTop = TerminalMetrics.PADDING + row.row() * lineHeight;
+            double localCellTop = contentTop - rowTop;
+            double baseline = TerminalMetrics.PADDING + metrics.baselineOffset() + row.row() * lineHeight - rowTop;
+            double x = TerminalMetrics.PADDING + startColumn * cellWidth;
+            double width = (endColumn - startColumn + 1) * cellWidth;
+
+            gc.clearRect(x, 0.0, width, canvas.getHeight());
+            if (startColumn == 0) {
+                gc.setFill(rowEdgeBackground(row, true));
+                gc.fillRect(0.0, 0.0, TerminalMetrics.PADDING, canvas.getHeight());
+            }
+            if (endColumn >= row.cells().size() - 1) {
+                double contentRight = TerminalMetrics.PADDING + row.cells().size() * cellWidth;
+                gc.setFill(rowEdgeBackground(row, false));
+                gc.fillRect(contentRight, 0.0, canvas.getWidth() - contentRight, canvas.getHeight());
+            }
+
+            drawRowBackgrounds(gc, row, localCellTop, cellWidth, lineHeight, startColumn, endColumn);
+            drawRowText(gc, row, baseline, cellWidth, startColumn, endColumn);
         }
 
         private void paintSidePadding(GraphicsContext gc, RenderRow row, double paneWidth, double bandHeight) {
@@ -730,15 +826,19 @@ final class TerminalPaneNode extends Region {
             double contentTop = TerminalMetrics.PADDING + row.row() * lineHeight;
             double localCellTop = contentTop - rowTop;
             double baseline = TerminalMetrics.PADDING + metrics.baselineOffset() + row.row() * lineHeight - rowTop;
-            drawRowBackgrounds(gc, row, localCellTop, cellWidth, lineHeight);
-            drawRowText(gc, row, baseline, cellWidth);
+            drawRowBackgrounds(gc, row, localCellTop, cellWidth, lineHeight, 0, row.cells().size() - 1);
+            drawRowText(gc, row, baseline, cellWidth, 0, row.cells().size() - 1);
         }
 
-        private void drawRowBackgrounds(GraphicsContext gc, RenderRow row, double localCellTop, double cellWidth, double lineHeight) {
+        private void drawRowBackgrounds(GraphicsContext gc, RenderRow row, double localCellTop,
+                double cellWidth, double lineHeight, int startColumn, int endColumn) {
             Color runBackground = null;
             int runStartColumn = 0;
             int previousColumn = -1;
             for (RenderCell cell : row.cells()) {
+                if (cell.column() < startColumn || cell.column() > endColumn) {
+                    continue;
+                }
                 if (cell.kittyPlaceholder().isPresent()) {
                     flushBackgroundRun(gc, runBackground, localCellTop, cellWidth, lineHeight, runStartColumn, previousColumn);
                     runBackground = null;
@@ -777,8 +877,12 @@ final class TerminalPaneNode extends Region {
                     lineHeight);
         }
 
-        private void drawRowText(GraphicsContext gc, RenderRow row, double baseline, double cellWidth) {
+        private void drawRowText(GraphicsContext gc, RenderRow row, double baseline,
+                double cellWidth, int startColumn, int endColumn) {
             for (RenderCell cell : row.cells()) {
+                if (cell.column() < startColumn || cell.column() > endColumn) {
+                    continue;
+                }
                 if (cell.kittyPlaceholder().isPresent() || cell.codepoints().length == 0) {
                     continue;
                 }
@@ -786,6 +890,19 @@ final class TerminalPaneNode extends Region {
                 gc.setFill(cellForegroundColor(cell));
                 gc.fillText(cell.text(), TerminalMetrics.PADDING + cell.column() * cellWidth, baseline);
             }
+        }
+
+        private static long[] cellFingerprints(RenderRow row) {
+            int columns = row.cells().size();
+            for (RenderCell cell : row.cells()) {
+                columns = Math.max(columns, cell.column() + 1);
+            }
+
+            long[] fingerprints = new long[columns];
+            for (RenderCell cell : row.cells()) {
+                fingerprints[cell.column()] = cellFingerprint(cell);
+            }
+            return fingerprints;
         }
     }
 

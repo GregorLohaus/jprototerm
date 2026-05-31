@@ -15,3 +15,6 @@ build
 .gradle
 bin
 .worktrees
+.classpath
+.project
+.settings

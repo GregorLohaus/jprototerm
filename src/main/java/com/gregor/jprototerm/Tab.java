@@ -75,6 +75,13 @@ final class Tab implements AutoCloseable {
         return List.copyOf(ordered);
     }
 
+    List<TerminalPane> allPanes() {
+        List<TerminalPane> all = new ArrayList<>(tiled.size() + floating.size());
+        all.addAll(tiled);
+        all.addAll(floating);
+        return List.copyOf(all);
+    }
+
     boolean isActive(TerminalPane pane) {
         return pane != null && pane == active;
     }

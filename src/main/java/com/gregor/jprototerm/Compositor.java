@@ -162,6 +162,14 @@ public final class Compositor {
         return tabs.isEmpty() ? List.of() : currentTab().panes();
     }
 
+    private List<TerminalPane> allOpenPanes() {
+        List<TerminalPane> panes = new ArrayList<>();
+        for (Tab tab : tabs) {
+            panes.addAll(tab.allPanes());
+        }
+        return panes;
+    }
+
     private boolean isActive(TerminalPane pane) {
         return !tabs.isEmpty() && currentTab().isActive(pane);
     }
@@ -180,8 +188,9 @@ public final class Compositor {
         long contentVersion = tabs.isEmpty() ? 0 : currentTab().contentVersion();
         boolean geometryChanged = width != lastWidth || height != lastHeight;
         boolean contentChanged = contentVersion != lastContentVersion;
+        boolean syncScene = sceneDirty || geometryChanged;
 
-        if (!sceneDirty && !geometryChanged && !contentChanged) {
+        if (!syncScene && !contentChanged) {
             return;
         }
 
@@ -189,14 +198,17 @@ public final class Compositor {
         lastHeight = height;
         lastContentVersion = contentVersion;
         sceneDirty = false;
-        renderFrame(width, height);
+        if (syncScene) {
+            syncSceneGraph(width, height);
+        }
+        renderVisiblePanes();
     }
 
     private void markSceneDirty() {
         sceneDirty = true;
     }
 
-    private void renderFrame(double width, double height) {
+    private void syncSceneGraph(double width, double height) {
         double topInset = tabs.size() > 1 ? TAB_BAR_HEIGHT : 0.0;
 
         paneLayer.resizeRelocate(0.0, 0.0, width, height);
@@ -207,16 +219,24 @@ public final class Compositor {
         }
 
         List<TerminalPane> panes = currentPanes();
-        retainNodes(panes);
+        retainNodes(allOpenPanes());
         List<TerminalPaneNode> orderedNodes = new ArrayList<>(panes.size());
         for (TerminalPane pane : panes) {
             pane.fitToBounds();
             TerminalPaneNode node = nodeFor(pane);
             node.resizeRelocate(Math.round(pane.x()), Math.round(pane.y()), pane.width(), pane.height());
-            node.renderIncremental(isActive(pane));
             orderedNodes.add(node);
         }
         paneLayer.getChildren().setAll(orderedNodes);
+    }
+
+    private void renderVisiblePanes() {
+        for (TerminalPane pane : currentPanes()) {
+            TerminalPaneNode node = nodes.get(pane);
+            if (node != null) {
+                node.renderIncremental(isActive(pane));
+            }
+        }
     }
 
     private TerminalPaneNode nodeFor(TerminalPane pane) {
@@ -233,9 +253,9 @@ public final class Compositor {
         return node;
     }
 
-    private void retainNodes(List<TerminalPane> visiblePanes) {
-        Set<TerminalPane> visible = new HashSet<>(visiblePanes);
-        nodes.keySet().removeIf(pane -> !visible.contains(pane));
+    private void retainNodes(List<TerminalPane> openPanes) {
+        Set<TerminalPane> open = new HashSet<>(openPanes);
+        nodes.keySet().removeIf(pane -> !open.contains(pane));
     }
 
     private void updateTabBar(double width, double barHeight) {

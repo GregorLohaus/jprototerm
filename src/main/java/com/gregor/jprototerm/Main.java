@@ -167,11 +167,16 @@ public final class Main extends Application {
 
     private void openScrollbackInEditor() {
         try {
+            // Capture the active pane's scrollback before opening the floating pane, since that
+            // makes the new pane active.
             Path file = Files.createTempFile("jprototerm-scrollback-", ".txt");
             Files.writeString(file, compositor.activePane().scrollbackText());
             file.toFile().deleteOnExit();
 
-            compositor.activePane().send(scrollbackEditorCommand(file) + "\r");
+            TerminalPane pane = compositor.openFloatingPane();
+            if (pane != null) {
+                pane.send(scrollbackEditorCommand(file) + "\r");
+            }
         } catch (IOException ex) {
             System.err.println("Could not open scrollback in editor: " + ex.getMessage());
         }

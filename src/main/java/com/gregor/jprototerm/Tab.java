@@ -257,11 +257,12 @@ final class Tab implements AutoCloseable {
         }
     }
 
-    private void createFloatingPane() {
+    TerminalPane createFloatingPane() {
         TerminalPane pane = openPane(true);
         floating.add(pane);
         floatingVisible = true;
         setActive(pane);
+        return pane;
     }
 
     private boolean navigateFloatingStack(Direction direction) {

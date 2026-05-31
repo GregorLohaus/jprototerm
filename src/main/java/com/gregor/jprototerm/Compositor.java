@@ -113,6 +113,16 @@ public final class Compositor {
         layoutVersion++;
     }
 
+    /** Opens a new floating pane, makes it active, and returns it (null when no tab exists). */
+    public TerminalPane openFloatingPane() {
+        if (isEmpty()) {
+            return null;
+        }
+        TerminalPane pane = currentTab().createFloatingPane();
+        layoutVersion++;
+        return pane;
+    }
+
     public void nextFloatingPane() {
         if (isEmpty()) {
             return;

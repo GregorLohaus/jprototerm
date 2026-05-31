@@ -1,262 +1,276 @@
 package com.gregor.jprototerm;
 
+import javafx.scene.shape.Rectangle;
+import javafx.scene.shape.Shape;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
- * One tab: an isolated stack of panes (tiled + floating) with its own active pane and
- * stashed-floating state. {@link TerminalWorkspace} owns the list of tabs and renders only
- * the current one. Mutating methods return whether they actually changed anything so the
- * workspace can bump its render version conditionally.
+ * One tab: a row of tiled panes with a group of floating panes shown over them. Floating panes
+ * are shown/hidden as a group ({@code floatingVisible}), and there is always at least one tiled
+ * pane — a floating pane is promoted if the last tiled one closes — so the layout always has a
+ * base. The {@link Compositor} owns the tabs and renders only the current one; mutating methods
+ * return whether they actually changed anything so it can bump its layout version.
  */
 final class Tab implements AutoCloseable {
     private final AppConfig config;
-    private final List<TerminalPane> panes = new ArrayList<>();
-    private int activeIndex;
-    private int hiddenFloatingFocusIndex = -1;
+    private final TerminalMetrics metrics;
+    private final List<TerminalPane> tiled = new ArrayList<>();
+    private final List<TerminalPane> floating = new ArrayList<>();
+    private boolean floatingVisible;
+    private TerminalPane active;
+    // The floating pane to re-focus when the group is shown again, and to prefer when promoting
+    // after the last tiled pane closes.
     private TerminalPane lastFocusedFloating;
+    // Last laid-out size, so a newly opened pane can be created at roughly its eventual rect
+    // (and thus grid). Seeded from the configured window size for the first pane, which is
+    // opened before any layout pass runs.
+    private double lastWidth;
+    private double lastHeight;
+    private double lastTopInset;
+    // Bumped whenever one of this tab's panes changes content; the compositor reads the current
+    // tab's value each frame as an O(1) "anything to repaint?" check.
+    private long contentVersion;
 
-    Tab(AppConfig config) {
+    Tab(AppConfig config, TerminalMetrics metrics) {
         this.config = config;
-        panes.add(openPane(false));
+        this.metrics = metrics;
+        this.lastWidth = config.windowWidth();
+        this.lastHeight = config.windowHeight();
+        TerminalPane first = openPane(false);
+        tiled.add(first);
+        active = first;
     }
 
     TerminalPane activePane() {
-        return panes.get(activeIndex);
+        return active;
     }
 
     boolean isEmpty() {
-        return panes.isEmpty();
+        return tiled.isEmpty() && floating.isEmpty();
     }
 
+    long contentVersion() {
+        return contentVersion;
+    }
+
+    /**
+     * Panes to composite, bottom-to-top: tiled first, then (when shown) the floating group with
+     * the active floating pane on top.
+     */
     List<TerminalPane> panes() {
-        if (panes.isEmpty()) {
-            return List.of();
+        if (!floatingVisible || floating.isEmpty()) {
+            return List.copyOf(tiled);
         }
-        List<TerminalPane> visible = panes.stream().filter(TerminalPane::visible).toList();
-        if (visible.isEmpty()) {
-            return List.of();
-        }
-        // Draw order = z-order: all tiled panes first (they never overlap), then floating
-        // panes on top, with the active floating pane last (topmost). This holds regardless
-        // of creation order, so a tiled pane created after a floating one still sits behind.
-        TerminalPane active = activePane();
-        List<TerminalPane> ordered = new ArrayList<>(visible.size());
-        for (TerminalPane pane : visible) {
-            if (!pane.floating()) {
+        List<TerminalPane> ordered = new ArrayList<>(tiled.size() + floating.size());
+        ordered.addAll(tiled);
+        for (TerminalPane pane : floating) {
+            if (pane != active) {
                 ordered.add(pane);
             }
         }
-        for (TerminalPane pane : visible) {
-            if (pane.floating() && pane != active) {
-                ordered.add(pane);
-            }
-        }
-        if (active.visible() && active.floating()) {
-            ordered.add(active);
+        if (floating.contains(active)) {
+            ordered.add(active); // active floating pane on top
         }
         return List.copyOf(ordered);
     }
 
     boolean isActive(TerminalPane pane) {
-        return !panes.isEmpty() && activePane() == pane;
+        return pane != null && pane == active;
     }
 
     boolean focus(TerminalPane pane) {
-        int index = panes.indexOf(pane);
-        if (index >= 0 && pane.visible() && activeIndex != index) {
-            setActive(index);
-            return true;
+        if (pane == active || !isFocusable(pane)) {
+            return false;
         }
-        return false;
+        setActive(pane);
+        return true;
     }
 
     void layout(double width, double height, double topInset) {
+        this.lastWidth = width;
+        this.lastHeight = height;
+        this.lastTopInset = topInset;
         double availHeight = height - topInset;
-        List<TerminalPane> tiled = panes.stream()
-                .filter(TerminalPane::visible)
-                .filter(pane -> !pane.floating())
-                .toList();
-        int tileCount = Math.max(1, tiled.size());
-        double tileWidth = width / tileCount;
+
+        double tileWidth = width / Math.max(1, tiled.size());
         for (int i = 0; i < tiled.size(); i++) {
             tiled.get(i).bounds(i * tileWidth, topInset, tileWidth, availHeight);
         }
 
-        List<TerminalPane> floating = panes.stream()
-                .filter(TerminalPane::visible)
-                .filter(TerminalPane::floating)
-                .toList();
+        double floatingWidth = Math.max(420, width * 0.58);
+        double floatingHeight = Math.max(260, availHeight * 0.58);
         for (int i = 0; i < floating.size(); i++) {
-            TerminalPane pane = floating.get(i);
-            double floatingWidth = Math.max(420, width * 0.58);
-            double floatingHeight = Math.max(260, availHeight * 0.58);
             double offset = i * 28.0;
-            pane.bounds(
+            floating.get(i).bounds(
                     Math.min(width - floatingWidth - 12.0, ((width - floatingWidth) / 2.0) + offset),
                     Math.min(height - floatingHeight - 12.0, topInset + ((availHeight - floatingHeight) / 2.0) + offset),
                     floatingWidth,
-                    floatingHeight
-            );
+                    floatingHeight);
+        }
+
+        assignClips();
+    }
+
+    // Give each pane its clip region for the next paints, so repainting a pane on a content
+    // frame can never bleed over one stacked on top of it. Each pane is clipped to its rect
+    // minus the union of the panes above it: floating panes are clipped by the floating panes
+    // higher in the stack, and tiled panes by the whole floating group. When nothing floats,
+    // every pane clips to its plain bounds.
+    private void assignClips() {
+        if (!floatingVisible || floating.isEmpty()) {
+            tiled.forEach(pane -> pane.setClip(null));
+            floating.forEach(pane -> pane.setClip(null));
+            return;
+        }
+
+        // Floating panes bottom-to-top, matching panes(): insertion order, active pane on top.
+        List<TerminalPane> order = new ArrayList<>(floating.size());
+        for (TerminalPane pane : floating) {
+            if (pane != active) {
+                order.add(pane);
+            }
+        }
+        if (floating.contains(active)) {
+            order.add(active);
+        }
+
+        // Walk top-to-bottom, accumulating the union of the panes above each one.
+        Shape above = null;
+        for (int i = order.size() - 1; i >= 0; i--) {
+            Rectangle rect = rectOf(order.get(i));
+            order.get(i).setClip(above == null ? null : Shape.subtract(rect, above));
+            above = (above == null) ? rect : Shape.union(above, rect);
+        }
+
+        // `above` is now the union of every floating pane; tiled panes sit under all of them.
+        for (TerminalPane pane : tiled) {
+            pane.setClip(Shape.subtract(rectOf(pane), above));
         }
     }
 
+    // Match the renderer's pixel snapping (round the origin, keep width/height) so the clip
+    // lines up exactly with where the floating panes are drawn.
+    private static Rectangle rectOf(TerminalPane pane) {
+        return new Rectangle(Math.round(pane.x()), Math.round(pane.y()), pane.width(), pane.height());
+    }
+
     boolean navigate(Direction direction) {
-        TerminalPane current = activePane();
-        if (current.floating() && navigateFloatingStack(direction)) {
+        if (floating.contains(active) && navigateFloatingStack(direction)) {
             return true;
         }
-
-        TerminalPane target = panes.stream()
-                .filter(TerminalPane::visible)
-                .filter(pane -> pane != current)
-                .filter(pane -> directionFilter(direction, current, pane))
-                .min(Comparator.comparingDouble(pane -> distance(current, pane)))
+        TerminalPane target = focusable()
+                .filter(pane -> pane != active)
+                .filter(pane -> directionFilter(direction, active, pane))
+                .min(Comparator.comparingDouble(pane -> distance(active, pane)))
                 .orElse(null);
         if (target != null) {
-            setActive(panes.indexOf(target));
+            setActive(target);
             return true;
         }
         return false;
     }
 
     void toggleFloating() {
-        List<TerminalPane> floating = panes.stream()
-                .filter(TerminalPane::floating)
-                .toList();
         if (floating.isEmpty()) {
             createFloatingPane();
             return;
         }
-
-        boolean anyVisible = floating.stream().anyMatch(TerminalPane::visible);
-        if (anyVisible) {
-            TerminalPane active = activePane();
-            hiddenFloatingFocusIndex = active.floating() ? activeIndex : firstVisibleFloatingIndex();
-            floating.forEach(pane -> pane.setVisible(false));
-            setActive(firstVisibleNonFloatingIndex());
+        if (floatingVisible) {
+            floatingVisible = false;
+            if (floating.contains(active)) {
+                setActive(tiled.get(0));
+            }
         } else {
-            floating.forEach(pane -> pane.setVisible(true));
-            setActive(visibleIndexOrFallback(hiddenFloatingFocusIndex, panes.indexOf(floating.get(floating.size() - 1))));
-            hiddenFloatingFocusIndex = -1;
+            floatingVisible = true;
+            setActive(floating.contains(lastFocusedFloating) ? lastFocusedFloating : floating.get(floating.size() - 1));
         }
     }
 
-    /**
-     * "New pane": adds a floating pane while floating panes are shown, otherwise adds a
-     * tiled pane (the tiled row is redistributed equally by the layout).
-     */
+    /** Adds a floating pane while the floating group is shown, otherwise a tiled pane. */
     void createPane() {
-        if (anyFloatingVisible()) {
+        if (floatingVisible) {
             createFloatingPane();
         } else {
             TerminalPane pane = openPane(false);
-            panes.add(pane);
-            setActive(panes.size() - 1);
+            tiled.add(pane);
+            setActive(pane);
         }
     }
 
     void nextFloatingPane() {
-        TerminalPane next = nextFloatingAfter(activeIndex);
-        next.setVisible(true);
-        setActive(panes.indexOf(next));
+        if (floating.isEmpty()) {
+            createFloatingPane();
+            return;
+        }
+        floatingVisible = true;
+        int current = floating.indexOf(active); // -1 when the active pane is tiled
+        setActive(floating.get((current + 1 + floating.size()) % floating.size()));
     }
 
     void closeActivePane() {
-        TerminalPane active = activePane();
-        int removed = activeIndex;
-        // When closing a floating pane, focus the next visible floating pane if there is one
-        // (don't jump to a tiled pane); otherwise fall back to the nearest visible pane.
-        int target = active.floating() ? nearestVisibleFloatingIndex(removed) : -1;
-        if (target < 0) {
-            target = previousVisibleIndex(removed);
+        TerminalPane closing = active;
+        boolean wasFloating = floating.remove(closing);
+        if (!wasFloating) {
+            tiled.remove(closing);
         }
-        panes.remove(removed);
-        if (active == lastFocusedFloating) {
+        if (closing == lastFocusedFloating) {
             lastFocusedFloating = null;
         }
-        active.close();
-        if (panes.isEmpty()) {
-            activeIndex = 0;
+        closing.close();
+
+        if (tiled.isEmpty() && floating.isEmpty()) {
+            active = null; // tab is now empty; the compositor drops it
             return;
         }
-        activeIndex = adjustIndexAfterRemoval(target, removed);
-        hiddenFloatingFocusIndex = adjustHiddenFocusAfterRemoval(hiddenFloatingFocusIndex, removed);
 
-        // If the last tiled (main) pane was closed, promote a floating pane to be the new
-        // main pane so the layout has a base and rendering continues normally. Prefer the
-        // most recently focused floating pane.
-        if (panes.stream().noneMatch(pane -> !pane.floating())) {
-            TerminalPane promote = (lastFocusedFloating != null && panes.contains(lastFocusedFloating))
-                    ? lastFocusedFloating
-                    : panes.get(activeIndex);
-            promote.setFloating(false);
-            promote.setVisible(true);
-            activeIndex = panes.indexOf(promote);
-            lastFocusedFloating = null;
+        // Always keep a tiled base: if the last tiled pane just closed, promote a floating one
+        // (preferring the last focused).
+        if (tiled.isEmpty()) {
+            TerminalPane promote = floating.contains(lastFocusedFloating) ? lastFocusedFloating : floating.get(0);
+            var promoteIndex = floating.indexOf(promote);
+            var nextFocussed = promoteIndex == 0 ? 0 : promoteIndex - 1;
+            floating.remove(promote);
+            tiled.add(promote);
+            if (promote == lastFocusedFloating) {
+                lastFocusedFloating = null;
+                if (!floating.isEmpty()) {
+                    lastFocusedFloating = floating.isEmpty() ? null : floating.get(nextFocussed);
+                }
+            }
+        }
+        if (floating.isEmpty()) {
+            floatingVisible = false;
         }
 
-        // If only hidden panes remained, reveal the one we're focusing so the screen isn't
-        // blank.
-        if (!panes.get(activeIndex).visible()) {
-            panes.get(activeIndex).setVisible(true);
-        }
+        setActive(wasFloating && floatingVisible ? floating.get(floating.size() - 1) : tiled.get(0));
     }
 
-    private void setActive(int index) {
-        activeIndex = index;
-        if (index >= 0 && index < panes.size() && panes.get(index).floating()) {
-            lastFocusedFloating = panes.get(index);
+    private void setActive(TerminalPane pane) {
+        active = pane;
+        if (floating.contains(pane)) {
+            lastFocusedFloating = pane;
         }
     }
 
     private void createFloatingPane() {
         TerminalPane pane = openPane(true);
-        panes.add(pane);
-        setActive(panes.size() - 1);
-    }
-
-    private boolean anyFloatingVisible() {
-        return panes.stream().anyMatch(pane -> pane.floating() && pane.visible());
-    }
-
-    private TerminalPane nextFloatingAfter(int index) {
-        for (int i = index + 1; i < panes.size(); i++) {
-            TerminalPane pane = panes.get(i);
-            if (pane.floating()) {
-                return pane;
-            }
-        }
-        for (int i = 0; i <= index && i < panes.size(); i++) {
-            TerminalPane pane = panes.get(i);
-            if (pane.floating()) {
-                return pane;
-            }
-        }
-        return createAndReturnFloatingPane();
-    }
-
-    private TerminalPane createAndReturnFloatingPane() {
-        TerminalPane pane = openPane(true);
-        panes.add(pane);
-        return pane;
+        floating.add(pane);
+        floatingVisible = true;
+        setActive(pane);
     }
 
     private boolean navigateFloatingStack(Direction direction) {
-        List<TerminalPane> floating = panes.stream()
-                .filter(TerminalPane::visible)
-                .filter(TerminalPane::floating)
-                .toList();
         if (floating.size() < 2) {
             return false;
         }
-
-        int current = floating.indexOf(activePane());
+        int current = floating.indexOf(active);
         if (current < 0) {
             return false;
         }
-
         int next = switch (direction) {
             case LEFT, UP -> current - 1;
             case DOWN, RIGHT -> current + 1;
@@ -264,85 +278,35 @@ final class Tab implements AutoCloseable {
         if (next < 0 || next >= floating.size()) {
             return false;
         }
-
-        setActive(panes.indexOf(floating.get(next)));
+        setActive(floating.get(next));
         return true;
     }
 
-    private int firstVisibleFloatingIndex() {
-        for (int i = 0; i < panes.size(); i++) {
-            TerminalPane pane = panes.get(i);
-            if (pane.visible() && pane.floating()) {
-                return i;
-            }
-        }
-        return -1;
+    private boolean isFocusable(TerminalPane pane) {
+        return tiled.contains(pane) || (floatingVisible && floating.contains(pane));
     }
 
-    private int firstVisibleNonFloatingIndex() {
-        for (int i = 0; i < panes.size(); i++) {
-            TerminalPane pane = panes.get(i);
-            if (pane.visible() && !pane.floating()) {
-                return i;
-            }
-        }
-        return 0;
+    private Stream<TerminalPane> focusable() {
+        return floatingVisible ? Stream.concat(tiled.stream(), floating.stream()) : tiled.stream();
     }
 
-    private int nearestVisibleFloatingIndex(int index) {
-        for (int i = index + 1; i < panes.size(); i++) {
-            if (panes.get(i).visible() && panes.get(i).floating()) {
-                return i;
-            }
-        }
-        for (int i = index - 1; i >= 0; i--) {
-            if (panes.get(i).visible() && panes.get(i).floating()) {
-                return i;
-            }
-        }
-        return -1;
+    private void markContentChanged() {
+        contentVersion++;
     }
 
-    private int previousVisibleIndex(int index) {
-        for (int i = index - 1; i >= 0; i--) {
-            if (panes.get(i).visible()) {
-                return i;
-            }
+    private TerminalPane openPane(boolean asFloating) {
+        double availHeight = lastHeight - lastTopInset;
+        double widthPx;
+        double heightPx;
+        if (asFloating) {
+            widthPx = Math.max(420, lastWidth * 0.58);
+            heightPx = Math.max(260, availHeight * 0.58);
+        } else {
+            // A new tiled pane joins the row, so each gets 1/(n+1) of the width.
+            widthPx = lastWidth / (tiled.size() + 1);
+            heightPx = availHeight;
         }
-        for (int i = index + 1; i < panes.size(); i++) {
-            if (panes.get(i).visible()) {
-                return i;
-            }
-        }
-        return firstVisibleNonFloatingIndex();
-    }
-
-    private int visibleIndexOrFallback(int index, int fallback) {
-        if (index >= 0 && index < panes.size() && panes.get(index).visible()) {
-            return index;
-        }
-        return fallback;
-    }
-
-    private static int adjustIndexAfterRemoval(int index, int removedIndex) {
-        if (index < 0) {
-            return 0;
-        }
-        return index > removedIndex ? index - 1 : index;
-    }
-
-    private static int adjustHiddenFocusAfterRemoval(int index, int removedIndex) {
-        if (index < 0 || index == removedIndex) {
-            return -1;
-        }
-        return index > removedIndex ? index - 1 : index;
-    }
-
-    private TerminalPane openPane(boolean floating) {
-        TerminalPane pane = TerminalPane.create(config.columns(), config.rows(), config.maxScrollback());
-        pane.setFloating(floating);
-        pane.attach(ShellSession.start(config.shell(), config.envOverride(), pane, config.columns(), config.rows()));
-        return pane;
+        return TerminalPane.create(config, metrics, this::markContentChanged, widthPx, heightPx);
     }
 
     private static boolean directionFilter(Direction direction, TerminalPane current, TerminalPane candidate) {
@@ -367,9 +331,9 @@ final class Tab implements AutoCloseable {
 
     @Override
     public void close() {
-        for (TerminalPane pane : panes) {
-            pane.close();
-        }
-        panes.clear();
+        tiled.forEach(TerminalPane::close);
+        floating.forEach(TerminalPane::close);
+        tiled.clear();
+        floating.clear();
     }
 }

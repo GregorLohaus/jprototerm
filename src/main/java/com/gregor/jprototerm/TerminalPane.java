@@ -283,13 +283,15 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
     }
 
     /** Paint the whole pane; see {@link TerminalRenderer#paintFull}. */
-    public void paintFull(GraphicsContext gc, boolean active) {
+    public long paintFull(GraphicsContext gc, boolean active) {
         renderer.paintFull(gc, this, active);
+        return snapshotVersion;
     }
 
     /** Repaint what changed; see {@link TerminalRenderer#paintIncremental}. */
-    public void paintIncremental(GraphicsContext gc, boolean active) {
+    public long paintIncremental(GraphicsContext gc, boolean active) {
         renderer.paintIncremental(gc, this, active);
+        return snapshotVersion;
     }
 
     @Override

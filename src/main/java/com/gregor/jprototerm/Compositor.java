@@ -23,7 +23,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -48,12 +47,9 @@ public final class Compositor {
     private final List<Tab> tabs = new ArrayList<>();
     private final Map<TerminalPane, TerminalPaneNode> nodes = new HashMap<>();
     private int currentTabIndex;
-    private long layoutVersion;
+    private boolean sceneDirty = true;
     private double lastWidth = -1.0;
     private double lastHeight = -1.0;
-    private String lastFontFamily;
-    private double lastFontSize = -1.0;
-    private long lastLayoutVersion = Long.MIN_VALUE;
     private long lastContentVersion = Long.MIN_VALUE;
     private boolean mouseButtonPressed;
     private MouseButton pressedButton = MouseButton.UNKNOWN;
@@ -80,7 +76,7 @@ public final class Compositor {
     public void setFont(String family, double size) {
         metrics.setFont(family, size);
         nodes.values().forEach(TerminalPaneNode::discard);
-        lastWidth = -1.0;
+        markSceneDirty();
     }
 
     // ---- Tabs and panes -------------------------------------------------------------
@@ -95,7 +91,7 @@ public final class Compositor {
 
     public void navigate(Direction direction) {
         if (!isEmpty() && currentTab().navigate(direction)) {
-            layoutVersion++;
+            markSceneDirty();
         }
     }
 
@@ -104,7 +100,7 @@ public final class Compositor {
             return;
         }
         currentTab().toggleFloating();
-        layoutVersion++;
+        markSceneDirty();
     }
 
     public void createPane() {
@@ -112,7 +108,7 @@ public final class Compositor {
             return;
         }
         currentTab().createPane();
-        layoutVersion++;
+        markSceneDirty();
     }
 
     public void nextFloatingPane() {
@@ -120,7 +116,7 @@ public final class Compositor {
             return;
         }
         currentTab().nextFloatingPane();
-        layoutVersion++;
+        markSceneDirty();
     }
 
     public void closeActivePane() {
@@ -134,26 +130,26 @@ public final class Compositor {
                 currentTabIndex = Math.max(0, tabs.size() - 1);
             }
         }
-        layoutVersion++;
+        markSceneDirty();
     }
 
     public void newTab() {
         tabs.add(new Tab(config, metrics));
         currentTabIndex = tabs.size() - 1;
-        layoutVersion++;
+        markSceneDirty();
     }
 
     public void nextTab() {
         if (tabs.size() > 1) {
             currentTabIndex = (currentTabIndex + 1) % tabs.size();
-            layoutVersion++;
+            markSceneDirty();
         }
     }
 
     public void previousTab() {
         if (tabs.size() > 1) {
             currentTabIndex = (currentTabIndex - 1 + tabs.size()) % tabs.size();
-            layoutVersion++;
+            markSceneDirty();
         }
     }
 
@@ -180,49 +176,35 @@ public final class Compositor {
 
     private void focus(TerminalPane pane) {
         if (!tabs.isEmpty() && currentTab().focus(pane)) {
-            layoutVersion++;
+            markSceneDirty();
         }
     }
 
     // ---- Rendering ------------------------------------------------------------------
 
     public void render() {
-        switch (nextFrameType()) {
-            case IDLE -> { }
-            case LAYOUT -> renderLayoutFrame();
-            case CONTENT -> renderContentFrame();
-        }
-    }
-
-    private FrameType nextFrameType() {
         double width = root.getWidth();
         double height = root.getHeight();
         long contentVersion = tabs.isEmpty() ? 0 : currentTab().contentVersion();
-
-        boolean layoutChanged = width != lastWidth || height != lastHeight
-                || metrics.fontSize() != lastFontSize || !Objects.equals(metrics.fontFamily(), lastFontFamily)
-                || layoutVersion != lastLayoutVersion;
+        boolean geometryChanged = width != lastWidth || height != lastHeight;
         boolean contentChanged = contentVersion != lastContentVersion;
+
+        if (!sceneDirty && !geometryChanged && !contentChanged) {
+            return;
+        }
 
         lastWidth = width;
         lastHeight = height;
-        lastFontFamily = metrics.fontFamily();
-        lastFontSize = metrics.fontSize();
-        lastLayoutVersion = layoutVersion;
         lastContentVersion = contentVersion;
-
-        if (layoutChanged) {
-            return FrameType.LAYOUT;
-        }
-        if (contentChanged) {
-            return FrameType.CONTENT;
-        }
-        return FrameType.IDLE;
+        sceneDirty = false;
+        renderFrame(width, height);
     }
 
-    private void renderLayoutFrame() {
-        double width = root.getWidth();
-        double height = root.getHeight();
+    private void markSceneDirty() {
+        sceneDirty = true;
+    }
+
+    private void renderFrame(double width, double height) {
         double topInset = tabs.size() > 1 ? TAB_BAR_HEIGHT : 0.0;
 
         paneLayer.resizeRelocate(0.0, 0.0, width, height);
@@ -243,15 +225,6 @@ public final class Compositor {
             orderedNodes.add(node);
         }
         paneLayer.getChildren().setAll(orderedNodes);
-    }
-
-    private void renderContentFrame() {
-        for (TerminalPane pane : currentPanes()) {
-            TerminalPaneNode node = nodes.get(pane);
-            if (node != null) {
-                node.renderIncremental(isActive(pane));
-            }
-        }
     }
 
     private TerminalPaneNode nodeFor(TerminalPane pane) {
@@ -299,7 +272,7 @@ public final class Compositor {
             final int index = i;
             label.setOnMousePressed(event -> {
                 currentTabIndex = index;
-                layoutVersion++;
+                markSceneDirty();
                 root.requestFocus();
                 event.consume();
             });
@@ -450,12 +423,6 @@ public final class Compositor {
             case MIDDLE -> MouseButton.MIDDLE;
             default -> MouseButton.UNKNOWN;
         };
-    }
-
-    private enum FrameType {
-        IDLE,
-        LAYOUT,
-        CONTENT
     }
 
     private record MouseTarget(MouseEncoderSize size, long screenWidth, long screenHeight) {

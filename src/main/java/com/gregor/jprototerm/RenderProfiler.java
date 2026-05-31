@@ -18,8 +18,11 @@ final class RenderProfiler {
     static final int FINGERPRINT = 1;
     static final int DRAW = 2;
     static final int FRAME = 3;
-    private static final int BUCKETS = 4;
-    private static final String[] NAMES = {"snapshot", "fingerprint", "draw", "frame-total"};
+    static final int UPDATE = 4;
+    static final int MARSHAL = 5;
+    private static final int BUCKETS = 6;
+    private static final String[] NAMES =
+            {"snapshot", "fingerprint", "draw", "frame-total", "update", "marshal"};
 
     private static final boolean ENABLED =
             Boolean.getBoolean("jprototerm.profile") || "1".equals(System.getenv("JPROTOTERM_PROFILE"));

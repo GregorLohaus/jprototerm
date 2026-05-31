@@ -160,13 +160,21 @@ public final class TerminalPane implements AutoCloseable {
         synchronized (terminal) {
             long version = contentVersion.get();
             if (full) {
+                long updateStart = RenderProfiler.start();
                 renderState.update(terminal);
+                RenderProfiler.stop(RenderProfiler.UPDATE, updateStart);
+                long marshalStart = RenderProfiler.start();
                 cachedSnapshot = renderState.snapshot();
+                RenderProfiler.stop(RenderProfiler.MARSHAL, marshalStart);
                 renderState.resetDirty();
                 snapshotVersion = version;
             } else if (snapshotVersion != version) {
+                long updateStart = RenderProfiler.start();
                 renderState.update(terminal);
+                RenderProfiler.stop(RenderProfiler.UPDATE, updateStart);
+                long marshalStart = RenderProfiler.start();
                 cachedSnapshot = renderState.snapshotIncremental();
+                RenderProfiler.stop(RenderProfiler.MARSHAL, marshalStart);
                 renderState.resetDirty();
                 snapshotVersion = version;
             }

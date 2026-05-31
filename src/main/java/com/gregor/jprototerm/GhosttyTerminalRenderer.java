@@ -101,9 +101,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             if (dirty == DIRTY_FULL) {
                 software.paintFullOrShifted(gc, target.snapshotFull(), px, py, width, height, active);
             } else if (dirty == DIRTY_PARTIAL) {
-                if (!software.canPaintDirty(snapshot)) {
-                    software.paintFullOrShifted(gc, target.snapshotFull(), px, py, width, height, active);
-                } else if (snapshot != null && snapshot.renderRows().size() == snapshot.rows()) {
+                if (snapshot != null && snapshot.renderRows().size() == snapshot.rows()) {
                     software.paintFullOrShifted(gc, snapshot, px, py, width, height, active);
                 } else {
                     software.paintDirty(gc, snapshot, px, py, width, height, active);
@@ -679,21 +677,12 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         private PixelBuffer<IntBuffer> pixelBuffer;
         private WritableImage image;
         private long[] rowHashes = new long[0];
-        private boolean[] paintedRows = new boolean[0];
         private CursorState lastCursor = CursorState.none();
         private GlyphCache glyphs;
-        private boolean valid;
 
         private void invalidate() {
             rowHashes = new long[0];
-            paintedRows = new boolean[0];
             lastCursor = CursorState.none();
-            valid = false;
-        }
-
-        private boolean canPaintDirty(RenderStateSnapshot snapshot) {
-            return valid && snapshot != null && rowHashes.length == snapshot.rows()
-                    && paintedRows.length == snapshot.rows() && allRowsPainted();
         }
 
         private void paintFull(GraphicsContext gc, RenderStateSnapshot snapshot,
@@ -701,11 +690,9 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             ensure(paneWidth, paneHeight);
             fillRect(0, 0, width, height, argbPre(PANE_BACKGROUND));
             if (snapshot != null) {
-                prepareRows(snapshot.rows());
                 paintSnapshot(snapshot);
                 drawCursor(snapshot);
                 rememberSnapshot(snapshot);
-                valid = allRowsPainted();
             } else {
                 invalidate();
             }
@@ -726,7 +713,6 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             if (scroll != 0) {
                 scrollContentPixels(scroll);
                 scrollHashes(scroll);
-                scrollPaintedRows(scroll);
             }
 
             CursorState cursor = CursorState.from(snapshot);
@@ -744,7 +730,6 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                 }
             }
             lastCursor = cursor;
-            valid = allRowsPainted();
             drawCursor(snapshot);
             drawBorder(active);
             present(gc, px, py);
@@ -753,9 +738,14 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         private void paintDirty(GraphicsContext gc, RenderStateSnapshot snapshot,
                 double px, double py, double paneWidth, double paneHeight, boolean active) {
             ensure(paneWidth, paneHeight);
-            if (!canPaintDirty(snapshot)) {
+            if (snapshot == null) {
                 return;
             }
+            if (rowHashes.length != snapshot.rows()) {
+                paintFull(gc, snapshot, px, py, paneWidth, paneHeight, active);
+                return;
+            }
+
             CursorState cursor = CursorState.from(snapshot);
             int oldCursorRow = lastCursor.viewportRow();
             int newCursorRow = cursor.viewportRow();
@@ -776,7 +766,6 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             }
             repaintCursorRow(snapshot, newCursorRow, repainted);
             lastCursor = cursor;
-            valid = allRowsPainted();
             drawCursor(snapshot);
             drawBorder(active);
             present(gc, px, py);
@@ -836,12 +825,12 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         }
 
         private boolean canDiff(RenderStateSnapshot snapshot) {
-            return canPaintDirty(snapshot) && snapshot.renderRows().size() == snapshot.rows();
+            return rowHashes.length == snapshot.rows() && snapshot.renderRows().size() == snapshot.rows();
         }
 
         private void rememberSnapshot(RenderStateSnapshot snapshot) {
             if (rowHashes.length != snapshot.rows()) {
-                prepareRows(snapshot.rows());
+                rowHashes = new long[snapshot.rows()];
             }
             for (RenderRow row : snapshot.renderRows()) {
                 rowHashes[row.row()] = rowHash(row);
@@ -867,11 +856,13 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                     continue;
                 }
                 int score = 0;
+                int overlap = 0;
                 for (int row = 0; row < rows; row++) {
                     int previous = row - delta;
                     if (previous < 0 || previous >= rows) {
                         continue;
                     }
+                    overlap++;
                     if (currentHashes[row] == rowHashes[previous]) {
                         score++;
                     }
@@ -903,17 +894,6 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                 }
             }
             rowHashes = shifted;
-        }
-
-        private void scrollPaintedRows(int rows) {
-            boolean[] shifted = new boolean[paintedRows.length];
-            for (int row = 0; row < shifted.length; row++) {
-                int previous = row - rows;
-                if (previous >= 0 && previous < paintedRows.length) {
-                    shifted[row] = paintedRows[previous];
-                }
-            }
-            paintedRows = shifted;
         }
 
         private void scrollContentPixels(int rows) {
@@ -972,30 +952,6 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             paintRowSidePadding(row, rowTop, rowHeight);
             paintRowBackgrounds(row, rowTop, rowHeight);
             paintRowText(row, rowTop);
-            markPainted(row.row());
-        }
-
-        private void prepareRows(int rows) {
-            rowHashes = new long[rows];
-            paintedRows = new boolean[rows];
-        }
-
-        private void markPainted(int row) {
-            if (row >= 0 && row < paintedRows.length) {
-                paintedRows[row] = true;
-            }
-        }
-
-        private boolean allRowsPainted() {
-            if (paintedRows.length == 0) {
-                return false;
-            }
-            for (boolean painted : paintedRows) {
-                if (!painted) {
-                    return false;
-                }
-            }
-            return true;
         }
 
         private void paintRowSidePadding(RenderRow row, int rowTop, int rowHeight) {

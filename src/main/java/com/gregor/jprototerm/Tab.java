@@ -153,16 +153,6 @@ final class Tab implements AutoCloseable {
         }
     }
 
-    void nextFloatingPane() {
-        if (floating.isEmpty()) {
-            createFloatingPane();
-            return;
-        }
-        floatingVisible = true;
-        int current = floating.indexOf(active); // -1 when the active pane is tiled
-        setActive(floating.get((current + 1 + floating.size()) % floating.size()));
-    }
-
     void closeActivePane() {
         TerminalPane closing = active;
         boolean wasFloating = floating.remove(closing);

@@ -111,14 +111,6 @@ public final class Compositor {
         markSceneDirty();
     }
 
-    public void nextFloatingPane() {
-        if (isEmpty()) {
-            return;
-        }
-        currentTab().nextFloatingPane();
-        markSceneDirty();
-    }
-
     public void closeActivePane() {
         if (isEmpty()) {
             return;

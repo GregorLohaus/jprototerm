@@ -70,9 +70,6 @@ public final class Main extends Application {
         } else if (config.keybindings().get("new_pane").matches(event)) {
             compositor.createPane();
             event.consume();
-        } else if (config.keybindings().get("next_floating").matches(event)) {
-            compositor.nextFloatingPane();
-            event.consume();
         } else if (config.keybindings().get("close_pane").matches(event)) {
             compositor.closeActivePane();
             event.consume();

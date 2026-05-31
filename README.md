@@ -106,7 +106,6 @@ navigate_up = "ALT+K"
 navigate_right = "ALT+L"
 toggle_floating = "ALT+F"
 new_pane = "ALT+N"
-next_floating = "ALT+F12"
 close_pane = "ALT+X"
 new_tab = "ALT+A"
 previous_tab = "ALT+SHIFT+H"
@@ -121,7 +120,6 @@ open_scrollback = "ALT+S"
 - `Alt+n`: new pane — a floating pane when floating panes are shown, otherwise a new tiled
   pane (tiled panes are split equally across the width)
 - `Alt+f`: show or hide all floating panes
-- `Alt+F12`: cycle floating panes
 - `Alt+x`: close the active pane; closing a tab's last pane closes the tab, and closing the
   last pane of the last tab quits
 - `Alt+a`: new tab

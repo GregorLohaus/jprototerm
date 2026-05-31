@@ -101,11 +101,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             if (dirty == DIRTY_FULL) {
                 software.paintFullOrShifted(gc, target.snapshotFull(), px, py, width, height, active);
             } else if (dirty == DIRTY_PARTIAL) {
-                if (snapshot != null && snapshot.renderRows().size() == snapshot.rows()) {
-                    software.paintFullOrShifted(gc, snapshot, px, py, width, height, active);
-                } else {
-                    software.paintDirty(gc, snapshot, px, py, width, height, active);
-                }
+                software.paintDirty(gc, target, snapshot, px, py, width, height, active);
             }
             // dirty == FALSE: nothing visible changed.
         }
@@ -735,14 +731,14 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             present(gc, px, py);
         }
 
-        private void paintDirty(GraphicsContext gc, RenderStateSnapshot snapshot,
+        private void paintDirty(GraphicsContext gc, RenderTarget target, RenderStateSnapshot snapshot,
                 double px, double py, double paneWidth, double paneHeight, boolean active) {
             ensure(paneWidth, paneHeight);
             if (snapshot == null) {
                 return;
             }
             if (rowHashes.length != snapshot.rows()) {
-                paintFull(gc, snapshot, px, py, paneWidth, paneHeight, active);
+                paintFull(gc, target.snapshotFull(), px, py, paneWidth, paneHeight, active);
                 return;
             }
 
@@ -751,6 +747,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             int newCursorRow = cursor.viewportRow();
             boolean cursorChanged = !cursor.equals(lastCursor);
             boolean[] repainted = new boolean[snapshot.rows()];
+            boolean needsCursorDraw = cursorChanged;
 
             for (RenderRow row : snapshot.renderRows()) {
                 if (!row.dirty()) {
@@ -759,28 +756,46 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                 paintRow(row);
                 rowHashes[row.row()] = rowHash(row);
                 repainted[row.row()] = true;
+                if (row.row() == newCursorRow) {
+                    needsCursorDraw = true;
+                }
             }
 
             if (cursorChanged) {
-                repaintCursorRow(snapshot, oldCursorRow, repainted);
+                if (!repaintCursorRow(snapshot, oldCursorRow, repainted)) {
+                    paintFullOrShifted(gc, target.snapshotFull(), px, py, paneWidth, paneHeight, active);
+                    return;
+                }
             }
-            repaintCursorRow(snapshot, newCursorRow, repainted);
+            if (repaintedRowHasCursor(newCursorRow, repainted)
+                    && !repaintCursorRow(snapshot, newCursorRow, repainted)) {
+                paintFullOrShifted(gc, target.snapshotFull(), px, py, paneWidth, paneHeight, active);
+                return;
+            }
             lastCursor = cursor;
-            drawCursor(snapshot);
+            if (needsCursorDraw) {
+                drawCursor(snapshot);
+            }
             drawBorder(active);
             present(gc, px, py);
         }
 
-        private void repaintCursorRow(RenderStateSnapshot snapshot, int rowIndex, boolean[] repainted) {
+        private boolean repaintCursorRow(RenderStateSnapshot snapshot, int rowIndex, boolean[] repainted) {
             if (rowIndex < 0 || rowIndex >= repainted.length || repainted[rowIndex]) {
-                return;
+                return true;
             }
             RenderRow row = rowByIndex(snapshot, rowIndex);
-            if (row != null) {
-                paintRow(row);
-                rowHashes[rowIndex] = rowHash(row);
-                repainted[rowIndex] = true;
+            if (row == null || !row.dirty()) {
+                return false;
             }
+            paintRow(row);
+            rowHashes[rowIndex] = rowHash(row);
+            repainted[rowIndex] = true;
+            return true;
+        }
+
+        private boolean repaintedRowHasCursor(int rowIndex, boolean[] repainted) {
+            return rowIndex >= 0 && rowIndex < repainted.length && repainted[rowIndex];
         }
 
         private RenderRow rowByIndex(RenderStateSnapshot snapshot, int rowIndex) {

@@ -108,9 +108,6 @@ final class Tab implements AutoCloseable {
                     floatingWidth,
                     floatingHeight);
         }
-
-        tiled.forEach(pane -> pane.setClip(null));
-        floating.forEach(pane -> pane.setClip(null));
     }
 
     boolean navigate(Direction direction) {

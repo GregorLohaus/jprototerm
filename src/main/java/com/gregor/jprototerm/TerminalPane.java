@@ -12,35 +12,27 @@ import dev.jlibghostty.RenderStateSnapshot;
 import dev.jlibghostty.ScrollViewport;
 import dev.jlibghostty.Terminal;
 import dev.jlibghostty.TerminalOptions;
-import javafx.scene.canvas.GraphicsContext;
-import javafx.scene.shape.Shape;
 
 import java.util.Optional;
 
 /**
  * One terminal: owns its ghostty {@link Terminal}, the {@link ShellSession}/pty driving it,
- * and its on-screen geometry and grid. It does not draw itself — it is a {@link RenderTarget}
- * that a {@link TerminalRenderer} paints. {@link #paintFull}/{@link #paintIncremental} are the
- * only rendering API exposed to the {@link Compositor}, and they just delegate to that
- * renderer; the compositor decides z-order and which rect each pane occupies.
+ * and its on-screen geometry and grid. It does not draw itself; {@link TerminalPaneNode}
+ * reads snapshots from it and represents the visible rows and kitty graphics as JavaFX nodes.
  */
-public final class TerminalPane implements AutoCloseable, RenderTarget {
+public final class TerminalPane implements AutoCloseable {
     private final Terminal terminal;
     private final TerminalMetrics metrics;
     private final boolean kittyEnabled;
     // Run on every content change so the owning tab can bump its content version — the
     // compositor's O(1) "did the current tab change?" gate.
     private final Runnable onContentChange;
-    private final TerminalRenderer renderer;
     private final MouseEncoder mouseEncoder = new MouseEncoder();
     // A persistent render state (reused across frames) is what makes ghostty's per-row dirty
     // tracking meaningful: update() accumulates dirty since the last resetDirty().
     private final RenderState renderState = new RenderState();
     private RenderStateSnapshot cachedSnapshot;
     private ShellSession session;
-    // Clip region for rendering (rect minus the panes covering this one), set at layout time;
-    // null means clip to the plain bounds. See RenderTarget#clip().
-    private Shape clip;
     private double x;
     private double y;
     private double width;
@@ -53,12 +45,11 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
     private long snapshotVersion = -1;
 
     private TerminalPane(Terminal terminal, TerminalMetrics metrics, boolean kittyEnabled,
-            Runnable onContentChange, TerminalRenderer renderer, int columns, int rows) {
+            Runnable onContentChange, int columns, int rows) {
         this.terminal = terminal;
         this.metrics = metrics;
         this.kittyEnabled = kittyEnabled;
         this.onContentChange = onContentChange;
-        this.renderer = renderer;
         this.columns = columns;
         this.rows = rows;
     }
@@ -75,8 +66,7 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
         int rows = heightPx > 0 ? metrics.rowsFor(heightPx) : config.rows();
         Terminal terminal = Ghostty.open(new TerminalOptions(columns, rows, config.maxScrollback()));
         terminal.setDeviceAttributesProvider(DeviceAttributes::xtermCompatible);
-        TerminalPane pane = new TerminalPane(terminal, metrics, config.kittyGraphics(), onContentChange,
-                new GhosttyTerminalRenderer(metrics), columns, rows);
+        TerminalPane pane = new TerminalPane(terminal, metrics, config.kittyGraphics(), onContentChange, columns, rows);
         pane.refresh();
         pane.attach(ShellSession.start(config.shell(), config.envOverride(), pane, columns, rows));
         return pane;
@@ -153,7 +143,6 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
      * Snapshotting is deferred here rather than done in refresh(), so a burst of writes
      * between two frames collapses into a single snapshot.
      */
-    @Override
     public RenderStateSnapshot snapshot() {
         return takeSnapshot(false);
     }
@@ -162,7 +151,6 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
      * Full snapshot with every row's cells populated. Used where the whole pane is redrawn
      * regardless of dirty state (the kitty-graphics path).
      */
-    @Override
     public RenderStateSnapshot snapshotFull() {
         return takeSnapshot(true);
     }
@@ -195,34 +183,28 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
         return contentVersion;
     }
 
-    @Override
     public boolean kittyEnabled() {
         return kittyEnabled;
     }
 
-    @Override
     public Optional<KittyGraphics> kittyGraphics() {
         synchronized (terminal) {
             return terminal.kittyGraphics();
         }
     }
 
-    @Override
     public double x() {
         return x;
     }
 
-    @Override
     public double y() {
         return y;
     }
 
-    @Override
     public double width() {
         return width;
     }
 
-    @Override
     public double height() {
         return height;
     }
@@ -232,16 +214,6 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
         this.y = y;
         this.width = width;
         this.height = height;
-    }
-
-    /** Set the clip region applied on the next paints (see {@link RenderTarget#clip()}). */
-    public void setClip(Shape clip) {
-        this.clip = clip;
-    }
-
-    @Override
-    public Shape clip() {
-        return clip;
     }
 
     /** Recompute the ghostty grid from the current bounds and the shared cell metrics. */
@@ -278,16 +250,6 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
         // one of its panes changed.
         contentVersion++;
         onContentChange.run();
-    }
-
-    /** Paint the whole pane; see {@link TerminalRenderer#paintFull}. */
-    public void paintFull(GraphicsContext gc, boolean active) {
-        renderer.paintFull(gc, this, active);
-    }
-
-    /** Repaint what changed; see {@link TerminalRenderer#paintIncremental}. */
-    public void paintIncremental(GraphicsContext gc, boolean active) {
-        renderer.paintIncremental(gc, this, active);
     }
 
     @Override

@@ -29,9 +29,12 @@ import javafx.scene.text.FontSmoothingType;
 
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * JavaFX node for one terminal pane. The pane is composed from JavaFX primitives: one node per
@@ -57,6 +60,7 @@ final class TerminalPaneNode extends Region {
     private final Rectangle bottomPadding = new Rectangle();
     private final Rectangle border = new Rectangle();
     private final Map<Integer, TerminalRowNode> rows = new HashMap<>();
+    private final Map<Integer, Long> rowFingerprints = new HashMap<>();
     private final Map<KittyImageKey, Image> kittyImageCache = new HashMap<>();
     private long drawnContentVersion = Long.MIN_VALUE;
     private double drawnWidth = -1.0;
@@ -78,6 +82,7 @@ final class TerminalPaneNode extends Region {
         drawnWidth = -1.0;
         drawnHeight = -1.0;
         rows.clear();
+        rowFingerprints.clear();
         rowLayer.getChildren().setAll(topPadding, bottomPadding);
         belowImageLayer.getChildren().clear();
         aboveImageLayer.getChildren().clear();
@@ -110,7 +115,7 @@ final class TerminalPaneNode extends Region {
         RenderStateSnapshot snapshot = pane.snapshot();
         int dirty = snapshot == null ? DIRTY_FULL : snapshot.dirty();
         if (dirty == DIRTY_FULL) {
-            updateRowsFull(snapshot);
+            updateChangedRows(snapshot, snapshot.renderRows());
         } else if (dirty == DIRTY_PARTIAL) {
             updateDirtyRows(snapshot);
         }
@@ -149,6 +154,7 @@ final class TerminalPaneNode extends Region {
     private void updateRowsFull(RenderStateSnapshot snapshot) {
         if (snapshot == null) {
             rows.clear();
+            rowFingerprints.clear();
             rowLayer.getChildren().setAll(topPadding, bottomPadding);
             return;
         }
@@ -156,23 +162,132 @@ final class TerminalPaneNode extends Region {
         List<Node> ordered = new ArrayList<>(snapshot.renderRows().size() + 2);
         ordered.add(topPadding);
         ordered.add(bottomPadding);
+        Set<Integer> liveRows = new HashSet<>();
         for (RenderRow row : snapshot.renderRows()) {
             TerminalRowNode node = rowNode(row.row());
+            long fingerprint = rowFingerprint(row);
             node.render(row);
+            rowFingerprints.put(row.row(), fingerprint);
+            liveRows.add(row.row());
             ordered.add(node);
         }
-        rows.keySet().retainAll(snapshot.renderRows().stream().map(RenderRow::row).toList());
+        rows.keySet().retainAll(liveRows);
+        rowFingerprints.keySet().retainAll(liveRows);
         rowLayer.getChildren().setAll(ordered);
         updateVerticalPadding(snapshot);
     }
 
     private void updateDirtyRows(RenderStateSnapshot snapshot) {
+        List<RenderRow> dirtyRows = snapshot.renderRows().stream()
+                .filter(RenderRow::dirty)
+                .toList();
+        updateChangedRows(snapshot, dirtyRows);
+    }
+
+    private void updateChangedRows(RenderStateSnapshot snapshot, List<RenderRow> changedRows) {
+        if (snapshot == null || changedRows.isEmpty()) {
+            return;
+        }
+
+        Set<Integer> movedRows = moveShiftedRows(snapshot, changedRows);
         for (RenderRow row : snapshot.renderRows()) {
-            if (row.dirty()) {
-                rowNode(row.row()).render(row);
-                updateDirtyVerticalPadding(snapshot, row);
+            if (!changedRows.contains(row) || movedRows.contains(row.row())) {
+                continue;
+            }
+            TerminalRowNode node = rowNode(row.row());
+            long fingerprint = rowFingerprint(row);
+            node.render(row);
+            rowFingerprints.put(row.row(), fingerprint);
+        }
+        for (RenderRow row : changedRows) {
+            updateDirtyVerticalPadding(snapshot, row);
+        }
+        syncRowChildren();
+    }
+
+    private Set<Integer> moveShiftedRows(RenderStateSnapshot snapshot, List<RenderRow> changedRows) {
+        if (rowFingerprints.isEmpty() || changedRows.size() < Math.max(4, snapshot.rows() / 3)) {
+            return Set.of();
+        }
+
+        ShiftPlan plan = detectShift(snapshot, changedRows);
+        if (plan == null) {
+            return Set.of();
+        }
+
+        Map<Integer, TerminalRowNode> oldRows = new HashMap<>(rows);
+        Map<Integer, Long> oldFingerprints = new HashMap<>(rowFingerprints);
+        for (RowMove move : plan.moves()) {
+            rows.remove(move.sourceRow());
+            rowFingerprints.remove(move.sourceRow());
+        }
+        for (RowMove move : plan.moves()) {
+            TerminalRowNode node = oldRows.get(move.sourceRow());
+            if (node == null) {
+                continue;
+            }
+            node.moveToRow(move.targetRow());
+            rows.put(move.targetRow(), node);
+            rowFingerprints.put(move.targetRow(), oldFingerprints.get(move.sourceRow()));
+        }
+        return plan.targetRows();
+    }
+
+    private ShiftPlan detectShift(RenderStateSnapshot snapshot, List<RenderRow> changedRows) {
+        int bestDelta = 0;
+        int bestScore = 0;
+        int rowCount = snapshot.rows();
+        for (int delta = -rowCount + 1; delta < rowCount; delta++) {
+            if (delta == 0) {
+                continue;
+            }
+            int score = 0;
+            for (RenderRow row : changedRows) {
+                int sourceRow = row.row() + delta;
+                if (sourceRow < 0 || sourceRow >= rowCount || !rows.containsKey(sourceRow)) {
+                    continue;
+                }
+                Long previous = rowFingerprints.get(sourceRow);
+                if (previous != null && previous == rowFingerprint(row)) {
+                    score++;
+                }
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                bestDelta = delta;
             }
         }
+
+        int threshold = Math.max(4, (changedRows.size() * 2 + 2) / 3);
+        if (bestScore < threshold) {
+            return null;
+        }
+
+        List<RowMove> moves = new ArrayList<>(bestScore);
+        Set<Integer> targetRows = new HashSet<>();
+        for (RenderRow row : changedRows) {
+            int sourceRow = row.row() + bestDelta;
+            if (sourceRow < 0 || sourceRow >= rowCount || !rows.containsKey(sourceRow)) {
+                continue;
+            }
+            Long previous = rowFingerprints.get(sourceRow);
+            if (previous != null && previous == rowFingerprint(row)) {
+                moves.add(new RowMove(sourceRow, row.row()));
+                targetRows.add(row.row());
+            }
+        }
+        return new ShiftPlan(moves, targetRows);
+    }
+
+    private void syncRowChildren() {
+        List<Node> ordered = new ArrayList<>(rows.size() + 2);
+        ordered.add(topPadding);
+        ordered.add(bottomPadding);
+        rows.entrySet().stream()
+                .sorted(Comparator.comparingInt(Map.Entry::getKey))
+                .map(Map.Entry::getValue)
+                .forEach(ordered::add);
+        rowLayer.getChildren().setAll(ordered);
     }
 
     private TerminalRowNode rowNode(int row) {
@@ -500,6 +615,39 @@ final class TerminalPaneNode extends Region {
         return created;
     }
 
+    private static long rowFingerprint(RenderRow row) {
+        long hash = 0xcbf29ce484222325L;
+        hash = mix(hash, row.cells().size());
+        for (RenderCell cell : row.cells()) {
+            hash = mix(hash, cell.column());
+            hash = mix(hash, cell.inverse() ? 1 : 0);
+            hash = mix(hash, cell.selected() ? 1 : 0);
+            hash = mix(hash, colorFingerprint(cell.foreground().orElse(null)));
+            hash = mix(hash, colorFingerprint(cell.background().orElse(null)));
+            hash = mix(hash, cell.text().hashCode());
+            if (cell.kittyPlaceholder().isPresent()) {
+                KittyPlaceholder placeholder = cell.kittyPlaceholder().get();
+                hash = mix(hash, placeholder.imageId());
+                hash = mix(hash, placeholder.placementId());
+                hash = mix(hash, placeholder.sourceRow());
+                hash = mix(hash, placeholder.sourceColumn());
+            }
+        }
+        return hash;
+    }
+
+    private static long colorFingerprint(RenderColor color) {
+        if (color == null) {
+            return -1L;
+        }
+        return ((long) color.red() << 16) | ((long) color.green() << 8) | color.blue();
+    }
+
+    private static long mix(long hash, long value) {
+        hash ^= value;
+        return hash * 0x100000001b3L;
+    }
+
     private static final class TerminalRowNode extends Region {
         private final TerminalMetrics metrics;
         private final Canvas canvas = new Canvas();
@@ -528,6 +676,18 @@ final class TerminalPaneNode extends Region {
 
             paintSidePadding(gc, row, paneWidth, rowHeight);
             drawRow(gc, row, rowTop, cellWidth, lineHeight);
+        }
+
+        private void moveToRow(int row) {
+            double paneWidth = ((Region) getParent()).getWidth();
+            double top = TerminalMetrics.PADDING;
+            double lineHeight = metrics.lineHeight();
+            double rowTop = Math.floor(top + row * lineHeight);
+            double rowBottom = Math.ceil(top + (row + 1) * lineHeight);
+            double rowHeight = Math.max(1.0, rowBottom - rowTop);
+            resizeRelocate(0.0, rowTop, paneWidth, rowHeight);
+            canvas.setWidth(Math.max(0.0, paneWidth));
+            canvas.setHeight(rowHeight);
         }
 
         private void paintSidePadding(GraphicsContext gc, RenderRow row, double paneWidth, double bandHeight) {
@@ -599,6 +759,12 @@ final class TerminalPaneNode extends Region {
     }
 
     private record SourceRect(double x, double y, double width, double height) {
+    }
+
+    private record RowMove(int sourceRow, int targetRow) {
+    }
+
+    private record ShiftPlan(List<RowMove> moves, Set<Integer> targetRows) {
     }
 
     private static final class KittyPlaceholderBounds {

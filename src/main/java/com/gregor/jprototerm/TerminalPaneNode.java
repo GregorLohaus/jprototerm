@@ -91,7 +91,9 @@ final class TerminalPaneNode extends Region {
 
     void renderFull(boolean active) {
         prepareGeometry();
+        long snapshotStart = RenderProfiler.start();
         RenderStateSnapshot snapshot = pane.snapshotFull();
+        RenderProfiler.stop(RenderProfiler.SNAPSHOT, snapshotStart);
         long renderedVersion = pane.snapshotVersion();
         boolean withKitty = pane.kittyEnabled() && hasKittyGraphics();
         updateRowsFull(snapshot);
@@ -102,6 +104,13 @@ final class TerminalPaneNode extends Region {
     }
 
     void renderIncremental(boolean active) {
+        long frameStart = RenderProfiler.start();
+        renderIncrementalBody(active);
+        RenderProfiler.stop(RenderProfiler.FRAME, frameStart);
+        RenderProfiler.frame();
+    }
+
+    private void renderIncrementalBody(boolean active) {
         boolean geometryChanged = prepareGeometry();
         boolean withKitty = pane.kittyEnabled() && hasKittyGraphics();
         if (drawnContentVersion == Long.MIN_VALUE || geometryChanged || withKitty) {
@@ -113,7 +122,9 @@ final class TerminalPaneNode extends Region {
             return;
         }
 
+        long snapshotStart = RenderProfiler.start();
         RenderStateSnapshot snapshot = pane.snapshot();
+        RenderProfiler.stop(RenderProfiler.SNAPSHOT, snapshotStart);
         long renderedVersion = pane.snapshotVersion();
         int dirty = snapshot == null ? DIRTY_FULL : snapshot.dirty();
         if (dirty == DIRTY_FULL) {
@@ -167,7 +178,9 @@ final class TerminalPaneNode extends Region {
         Set<Integer> liveRows = new HashSet<>();
         for (RenderRow row : snapshot.renderRows()) {
             TerminalRowNode node = rowNode(row.row());
+            long fpStart = RenderProfiler.start();
             long fingerprint = rowFingerprint(row);
+            RenderProfiler.stop(RenderProfiler.FINGERPRINT, fpStart);
             node.render(row);
             rowFingerprints.put(row.row(), fingerprint);
             liveRows.add(row.row());
@@ -197,7 +210,9 @@ final class TerminalPaneNode extends Region {
                 continue;
             }
             TerminalRowNode node = rowNode(row.row());
+            long fpStart = RenderProfiler.start();
             long fingerprint = rowFingerprint(row);
+            RenderProfiler.stop(RenderProfiler.FINGERPRINT, fpStart);
             node.renderChanged(row);
             rowFingerprints.put(row.row(), fingerprint);
         }
@@ -212,7 +227,9 @@ final class TerminalPaneNode extends Region {
             return Set.of();
         }
 
+        long shiftStart = RenderProfiler.start();
         ShiftPlan plan = detectShift(snapshot, changedRows);
+        RenderProfiler.stop(RenderProfiler.FINGERPRINT, shiftStart);
         if (plan == null) {
             return Set.of();
         }
@@ -692,6 +709,7 @@ final class TerminalPaneNode extends Region {
         private void render(RenderRow row) {
             prepareCanvas(row);
 
+            long drawStart = RenderProfiler.start();
             GraphicsContext gc = canvas.getGraphicsContext2D();
             gc.clearRect(0.0, 0.0, canvas.getWidth(), canvas.getHeight());
             gc.setFontSmoothingType(FontSmoothingType.LCD);
@@ -699,14 +717,20 @@ final class TerminalPaneNode extends Region {
 
             paintSidePadding(gc, row, canvas.getWidth(), canvas.getHeight());
             drawRow(gc, row, rowTop(row), metrics.cellWidth(), metrics.lineHeight());
+            RenderProfiler.stop(RenderProfiler.DRAW, drawStart);
+
+            long fpStart = RenderProfiler.start();
             cellFingerprints = cellFingerprints(row);
+            RenderProfiler.stop(RenderProfiler.FINGERPRINT, fpStart);
         }
 
         private void renderChanged(RenderRow row) {
             double oldWidth = canvas.getWidth();
             double oldHeight = canvas.getHeight();
             prepareCanvas(row);
+            long fpStart = RenderProfiler.start();
             long[] nextFingerprints = cellFingerprints(row);
+            RenderProfiler.stop(RenderProfiler.FINGERPRINT, fpStart);
             if (cellFingerprints.length != nextFingerprints.length
                     || oldWidth != canvas.getWidth()
                     || oldHeight != canvas.getHeight()) {
@@ -714,6 +738,7 @@ final class TerminalPaneNode extends Region {
                 return;
             }
 
+            long drawStart = RenderProfiler.start();
             GraphicsContext gc = canvas.getGraphicsContext2D();
             gc.setFontSmoothingType(FontSmoothingType.LCD);
             gc.setFont(metrics.font());
@@ -741,6 +766,7 @@ final class TerminalPaneNode extends Region {
             if (runStart >= 0) {
                 repaintColumns(gc, row, runStart, runEnd);
             }
+            RenderProfiler.stop(RenderProfiler.DRAW, drawStart);
             cellFingerprints = nextFingerprints;
         }
 

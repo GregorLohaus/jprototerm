@@ -239,7 +239,7 @@ public final class Compositor {
             pane.fitToBounds();
             TerminalPaneNode node = nodeFor(pane);
             node.resizeRelocate(Math.round(pane.x()), Math.round(pane.y()), pane.width(), pane.height());
-            node.renderFull(isActive(pane));
+            node.renderIncremental(isActive(pane));
             orderedNodes.add(node);
         }
         paneLayer.getChildren().setAll(orderedNodes);

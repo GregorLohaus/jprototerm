@@ -603,6 +603,27 @@ final class TerminalPaneNode extends Region {
         return cellBackgroundColor(firstCell ? cells.get(0) : cells.get(cells.size() - 1));
     }
 
+    private static Color cellBackgroundOverride(RenderCell cell) {
+        if (cell.inverse()) {
+            var fg = cell.foreground();
+            return fg.isPresent() ? toFxColor(fg.get()) : DEFAULT_FOREGROUND;
+        }
+        var bg = cell.background();
+        return bg.isPresent() ? toFxColor(bg.get()) : null;
+    }
+
+    private static Color cellForegroundColor(RenderCell cell) {
+        var fgOpt = cell.foreground();
+        var bgOpt = cell.background();
+        Color fg = fgOpt.isPresent() ? toFxColor(fgOpt.get()) : DEFAULT_FOREGROUND;
+        Color bg = bgOpt.isPresent() ? toFxColor(bgOpt.get()) : null;
+
+        if (cell.inverse()) {
+            return (bg != null) ? bg : PANE_BACKGROUND;
+        }
+        return fg;
+    }
+
     private static Color toFxColor(RenderColor color) {
         int key = (color.red() << 16) | (color.green() << 8) | color.blue();
         Color cached = COLOR_CACHE.get(key);
@@ -709,37 +730,61 @@ final class TerminalPaneNode extends Region {
             double contentTop = TerminalMetrics.PADDING + row.row() * lineHeight;
             double localCellTop = contentTop - rowTop;
             double baseline = TerminalMetrics.PADDING + metrics.baselineOffset() + row.row() * lineHeight - rowTop;
+            drawRowBackgrounds(gc, row, localCellTop, cellWidth, lineHeight);
+            drawRowText(gc, row, baseline, cellWidth);
+        }
+
+        private void drawRowBackgrounds(GraphicsContext gc, RenderRow row, double localCellTop, double cellWidth, double lineHeight) {
+            Color runBackground = null;
+            int runStartColumn = 0;
+            int previousColumn = -1;
             for (RenderCell cell : row.cells()) {
                 if (cell.kittyPlaceholder().isPresent()) {
+                    flushBackgroundRun(gc, runBackground, localCellTop, cellWidth, lineHeight, runStartColumn, previousColumn);
+                    runBackground = null;
+                    previousColumn = -1;
                     continue;
                 }
 
-                double x = TerminalMetrics.PADDING + cell.column() * cellWidth;
-                var fgOpt = cell.foreground();
-                var bgOpt = cell.background();
-                Color fg = fgOpt.isPresent() ? toFxColor(fgOpt.get()) : DEFAULT_FOREGROUND;
-                Color bg = bgOpt.isPresent() ? toFxColor(bgOpt.get()) : null;
-
-                if (cell.inverse()) {
-                    Color swappedBg = fg;
-                    fg = (bg != null) ? bg : PANE_BACKGROUND;
-                    bg = swappedBg;
-                }
-
-                if (bg != null) {
-                    gc.setFill(bg);
-                    gc.fillRect(x, localCellTop, cellWidth, lineHeight);
-                }
-                if (cell.selected()) {
-                    gc.setFill(SELECTED_BACKGROUND);
-                    gc.fillRect(x, localCellTop, cellWidth, lineHeight);
-                }
-                if (cell.codepoints().length == 0) {
+                Color background = cell.selected() ? SELECTED_BACKGROUND : cellBackgroundOverride(cell);
+                if (background == null) {
+                    flushBackgroundRun(gc, runBackground, localCellTop, cellWidth, lineHeight, runStartColumn, previousColumn);
+                    runBackground = null;
+                    previousColumn = -1;
                     continue;
                 }
 
-                gc.setFill(fg);
-                gc.fillText(cell.text(), x, baseline);
+                if (runBackground == null || background != runBackground || cell.column() != previousColumn + 1) {
+                    flushBackgroundRun(gc, runBackground, localCellTop, cellWidth, lineHeight, runStartColumn, previousColumn);
+                    runBackground = background;
+                    runStartColumn = cell.column();
+                }
+                previousColumn = cell.column();
+            }
+            flushBackgroundRun(gc, runBackground, localCellTop, cellWidth, lineHeight, runStartColumn, previousColumn);
+        }
+
+        private void flushBackgroundRun(GraphicsContext gc, Color background, double localCellTop,
+                double cellWidth, double lineHeight, int startColumn, int endColumn) {
+            if (background == null || endColumn < startColumn) {
+                return;
+            }
+            gc.setFill(background);
+            gc.fillRect(
+                    TerminalMetrics.PADDING + startColumn * cellWidth,
+                    localCellTop,
+                    (endColumn - startColumn + 1) * cellWidth,
+                    lineHeight);
+        }
+
+        private void drawRowText(GraphicsContext gc, RenderRow row, double baseline, double cellWidth) {
+            for (RenderCell cell : row.cells()) {
+                if (cell.kittyPlaceholder().isPresent() || cell.codepoints().length == 0) {
+                    continue;
+                }
+
+                gc.setFill(cellForegroundColor(cell));
+                gc.fillText(cell.text(), TerminalMetrics.PADDING + cell.column() * cellWidth, baseline);
             }
         }
     }

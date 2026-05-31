@@ -14,6 +14,7 @@ import dev.jlibghostty.Terminal;
 import dev.jlibghostty.TerminalOptions;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * One terminal: owns its ghostty {@link Terminal}, the {@link ShellSession}/pty driving it,
@@ -41,8 +42,8 @@ public final class TerminalPane implements AutoCloseable {
     private int rows;
     private int pixelWidth;
     private int pixelHeight;
-    private long contentVersion;
-    private long snapshotVersion = -1;
+    private final AtomicLong contentVersion = new AtomicLong();
+    private volatile long snapshotVersion = -1;
 
     private TerminalPane(Terminal terminal, TerminalMetrics metrics, boolean kittyEnabled,
             Runnable onContentChange, int columns, int rows) {
@@ -157,16 +158,17 @@ public final class TerminalPane implements AutoCloseable {
 
     private RenderStateSnapshot takeSnapshot(boolean full) {
         synchronized (terminal) {
+            long version = contentVersion.get();
             if (full) {
                 renderState.update(terminal);
                 cachedSnapshot = renderState.snapshot();
                 renderState.resetDirty();
-                snapshotVersion = contentVersion;
-            } else if (snapshotVersion != contentVersion) {
+                snapshotVersion = version;
+            } else if (snapshotVersion != version) {
                 renderState.update(terminal);
                 cachedSnapshot = renderState.snapshotIncremental();
                 renderState.resetDirty();
-                snapshotVersion = contentVersion;
+                snapshotVersion = version;
             }
             return cachedSnapshot;
         }
@@ -180,15 +182,11 @@ public final class TerminalPane implements AutoCloseable {
 
     /** This pane's own content revision, bumped on every change (see {@link #refresh()}). */
     public long contentVersion() {
-        synchronized (terminal) {
-            return contentVersion;
-        }
+        return contentVersion.get();
     }
 
     long snapshotVersion() {
-        synchronized (terminal) {
-            return snapshotVersion;
-        }
+        return snapshotVersion;
     }
 
     public boolean kittyEnabled() {
@@ -256,7 +254,7 @@ public final class TerminalPane implements AutoCloseable {
         // Mark this pane's content dirty (the snapshot is computed lazily in the paint path,
         // so a burst of writes collapses into one snapshot per frame) and tell the owning tab
         // one of its panes changed.
-        contentVersion++;
+        contentVersion.incrementAndGet();
         onContentChange.run();
     }
 

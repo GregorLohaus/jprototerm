@@ -846,12 +846,15 @@ final class TerminalPaneNode extends Region {
             double x = TerminalMetrics.PADDING + startColumn * cellWidth;
             double width = (endColumn - startColumn + 1) * cellWidth;
 
-            if (DEBUG_REPAINT) {
-                gc.setFill(Color.RED);
-                gc.fillRect(x, 0.0, width, canvas.getHeight());
-            } else {
-                gc.clearRect(x, 0.0, width, canvas.getHeight());
-            }
+            // Opaque base fill rather than clearRect: a transparent clear leaves the run's
+            // fractional edge pixels transparent, which show the near-black pane background
+            // as a thin seam bar against the adjacent (un-repainted) line. Filling opaque
+            // removes every transparent pixel; per-cell backgrounds then paint on top, and
+            // default-background cells correctly show PANE_BACKGROUND. Safe because the
+            // per-column path never runs while kitty graphics (which need a transparent row
+            // canvas for below-text images) are present.
+            gc.setFill(DEBUG_REPAINT ? Color.RED : PANE_BACKGROUND);
+            gc.fillRect(x, 0.0, width, canvas.getHeight());
             if (startColumn == 0) {
                 gc.setFill(rowEdgeBackground(row, true));
                 gc.fillRect(0.0, 0.0, TerminalMetrics.PADDING, canvas.getHeight());

@@ -17,7 +17,9 @@ import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
 import javafx.scene.paint.Color;
+import javafx.scene.text.Font;
 import javafx.scene.text.FontSmoothingType;
+import javafx.scene.text.Text;
 
 import java.io.ByteArrayInputStream;
 import java.util.HashMap;
@@ -51,6 +53,10 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     private final TerminalMetrics metrics;
     // Decoded kitty images for this renderer's pane (kitty graphics state is per-terminal).
     private final Map<KittyImageKey, Image> kittyImageCache = new HashMap<>();
+    private final StringBuilder asciiRun = new StringBuilder(256);
+    private Font asciiBatchFont;
+    private double asciiBatchCellWidth;
+    private boolean asciiBatchSafe;
 
     GhosttyTerminalRenderer(TerminalMetrics metrics) {
         this.metrics = metrics;
@@ -371,14 +377,95 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             double cellWidth,
             double lineHeight
     ) {
+        boolean canBatchAscii = canBatchAscii();
+        StringBuilder run = asciiRun;
+        run.setLength(0);
+        Color runForeground = null;
+        int runStartColumn = 0;
+        int previousColumn = -1;
+
         for (RenderCell cell : row.cells()) {
             if (cell.kittyPlaceholder().isPresent() || cell.codepoints().length == 0) {
+                flushAsciiRun(gc, run, runForeground, left, baseline, cellWidth, lineHeight, row.row(), runStartColumn);
+                runForeground = null;
+                previousColumn = -1;
                 continue;
             }
 
-            gc.setFill(cellForegroundColor(cell));
+            Color foreground = cellForegroundColor(cell);
+            if (canBatchAscii && isBatchableAscii(cell)) {
+                if (run.length() == 0 || foreground != runForeground || cell.column() != previousColumn + 1) {
+                    flushAsciiRun(gc, run, runForeground, left, baseline, cellWidth, lineHeight, row.row(), runStartColumn);
+                    runForeground = foreground;
+                    runStartColumn = cell.column();
+                }
+                run.append(cell.text());
+                previousColumn = cell.column();
+                continue;
+            }
+
+            flushAsciiRun(gc, run, runForeground, left, baseline, cellWidth, lineHeight, row.row(), runStartColumn);
+            runForeground = null;
+            previousColumn = -1;
+            gc.setFill(foreground);
             gc.fillText(cell.text(), left + (cell.column() * cellWidth), baseline + (row.row() * lineHeight));
         }
+        flushAsciiRun(gc, run, runForeground, left, baseline, cellWidth, lineHeight, row.row(), runStartColumn);
+    }
+
+    private boolean canBatchAscii() {
+        Font font = metrics.font();
+        double cellWidth = metrics.cellWidth();
+        if (font == asciiBatchFont && cellWidth == asciiBatchCellWidth) {
+            return asciiBatchSafe;
+        }
+
+        asciiBatchFont = font;
+        asciiBatchCellWidth = cellWidth;
+        asciiBatchSafe = printableAsciiHasCellWidth(font, cellWidth);
+        return asciiBatchSafe;
+    }
+
+    private static boolean printableAsciiHasCellWidth(Font font, double cellWidth) {
+        Text probe = new Text();
+        probe.setFont(font);
+        for (int codepoint = 0x20; codepoint <= 0x7e; codepoint++) {
+            probe.setText(Character.toString((char) codepoint));
+            if (Math.abs(Math.round(probe.getLayoutBounds().getWidth()) - cellWidth) > 0.01) {
+                return false;
+            }
+        }
+        for (String sample : List.of("iiii", "mmmm", "WwWw", "0O0O", "fi", "->", "==", "!=", "<=", ">=")) {
+            probe.setText(sample);
+            if (Math.abs(Math.round(probe.getLayoutBounds().getWidth()) - (sample.length() * cellWidth)) > 0.01) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isBatchableAscii(RenderCell cell) {
+        int[] codepoints = cell.codepoints();
+        return codepoints.length == 1 && codepoints[0] >= 0x20 && codepoints[0] <= 0x7e;
+    }
+
+    private static void flushAsciiRun(
+            GraphicsContext gc,
+            StringBuilder run,
+            Color foreground,
+            double left,
+            double baseline,
+            double cellWidth,
+            double lineHeight,
+            int row,
+            int startColumn
+    ) {
+        if (run.length() == 0) {
+            return;
+        }
+        gc.setFill(foreground);
+        gc.fillText(run.toString(), left + (startColumn * cellWidth), baseline + (row * lineHeight));
+        run.setLength(0);
     }
 
     // Background override for a cell: null means the pane default background already covers it.

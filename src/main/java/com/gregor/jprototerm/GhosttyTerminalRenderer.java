@@ -51,7 +51,6 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     private final TerminalMetrics metrics;
     // Decoded kitty images for this renderer's pane (kitty graphics state is per-terminal).
     private final Map<KittyImageKey, Image> kittyImageCache = new HashMap<>();
-    private final StringBuilder textRun = new StringBuilder(256);
 
     GhosttyTerminalRenderer(TerminalMetrics metrics) {
         this.metrics = metrics;
@@ -372,49 +371,14 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             double cellWidth,
             double lineHeight
     ) {
-        StringBuilder run = textRun;
-        run.setLength(0);
-        Color runForeground = null;
-        int runStartColumn = 0;
-        int previousColumn = -1;
-
         for (RenderCell cell : row.cells()) {
             if (cell.kittyPlaceholder().isPresent() || cell.codepoints().length == 0) {
-                flushTextRun(gc, run, runForeground, left, baseline, cellWidth, lineHeight, row.row(), runStartColumn);
-                runForeground = null;
-                previousColumn = -1;
                 continue;
             }
 
-            Color fg = cellForegroundColor(cell);
-            if (run.length() == 0 || fg != runForeground || cell.column() != previousColumn + 1) {
-                flushTextRun(gc, run, runForeground, left, baseline, cellWidth, lineHeight, row.row(), runStartColumn);
-                runForeground = fg;
-                runStartColumn = cell.column();
-            }
-            run.append(cell.text());
-            previousColumn = cell.column();
+            gc.setFill(cellForegroundColor(cell));
+            gc.fillText(cell.text(), left + (cell.column() * cellWidth), baseline + (row.row() * lineHeight));
         }
-        flushTextRun(gc, run, runForeground, left, baseline, cellWidth, lineHeight, row.row(), runStartColumn);
-    }
-
-    private static void flushTextRun(
-            GraphicsContext gc,
-            StringBuilder run,
-            Color foreground,
-            double left,
-            double baseline,
-            double cellWidth,
-            double lineHeight,
-            int row,
-            int startColumn
-    ) {
-        if (run.length() == 0) {
-            return;
-        }
-        gc.setFill(foreground);
-        gc.fillText(run.toString(), left + (startColumn * cellWidth), baseline + (row * lineHeight));
-        run.setLength(0);
     }
 
     // Background override for a cell: null means the pane default background already covers it.

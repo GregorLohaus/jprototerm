@@ -92,12 +92,13 @@ final class TerminalPaneNode extends Region {
     void renderFull(boolean active) {
         prepareGeometry();
         RenderStateSnapshot snapshot = pane.snapshotFull();
+        long renderedVersion = pane.snapshotVersion();
         boolean withKitty = pane.kittyEnabled() && hasKittyGraphics();
         updateRowsFull(snapshot);
         updateKittyGraphics(snapshot, withKitty);
         updateCursor(snapshot);
         updateBorder(active);
-        markDrawn();
+        markDrawn(renderedVersion);
     }
 
     void renderIncremental(boolean active) {
@@ -113,6 +114,7 @@ final class TerminalPaneNode extends Region {
         }
 
         RenderStateSnapshot snapshot = pane.snapshot();
+        long renderedVersion = pane.snapshotVersion();
         int dirty = snapshot == null ? DIRTY_FULL : snapshot.dirty();
         if (dirty == DIRTY_FULL) {
             updateChangedRows(snapshot, snapshot.renderRows());
@@ -122,7 +124,7 @@ final class TerminalPaneNode extends Region {
         updateKittyGraphics(snapshot, false);
         updateCursor(snapshot);
         updateBorder(active);
-        markDrawn();
+        markDrawn(renderedVersion);
     }
 
     private boolean prepareGeometry() {
@@ -578,8 +580,8 @@ final class TerminalPaneNode extends Region {
         return new SourceRect(sourceX, sourceY, Math.min(sourceWidth, image.getWidth() - sourceX), Math.min(sourceHeight, image.getHeight() - sourceY));
     }
 
-    private void markDrawn() {
-        drawnContentVersion = pane.contentVersion();
+    private void markDrawn(long renderedVersion) {
+        drawnContentVersion = renderedVersion;
         drawnWidth = pane.width();
         drawnHeight = pane.height();
     }

@@ -180,7 +180,15 @@ public final class TerminalPane implements AutoCloseable {
 
     /** This pane's own content revision, bumped on every change (see {@link #refresh()}). */
     public long contentVersion() {
-        return contentVersion;
+        synchronized (terminal) {
+            return contentVersion;
+        }
+    }
+
+    long snapshotVersion() {
+        synchronized (terminal) {
+            return snapshotVersion;
+        }
     }
 
     public boolean kittyEnabled() {

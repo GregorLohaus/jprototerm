@@ -4,52 +4,51 @@ import dev.jlibghostty.KeyModifiers;
 import dev.jlibghostty.MouseButton;
 import dev.jlibghostty.MouseEncoderSize;
 import dev.jlibghostty.MouseInput;
-import javafx.geometry.VPos;
-import javafx.scene.canvas.Canvas;
-import javafx.scene.canvas.GraphicsContext;
+import javafx.geometry.Pos;
+import javafx.scene.Parent;
+import javafx.scene.control.Label;
 import javafx.scene.input.InputEvent;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.input.ScrollEvent.VerticalTextScrollUnits;
+import javafx.scene.layout.Background;
+import javafx.scene.layout.BackgroundFill;
+import javafx.scene.layout.CornerRadii;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontSmoothingType;
-import javafx.scene.text.TextAlignment;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
- * Owns the window's tabs and drives rendering and input. It composites only the current tab:
- * each frame it lays that tab out, paints the panes bottom-to-top (so the active floating pane
- * lands on top) and lets each pane paint its own content, clipped to the region the layout gave
- * it. The cross-pane concerns live here — the dirty-frame bookkeeping, the tab strip, routing
- * mouse/scroll to the pane under the pointer, and the tab/pane lifecycle that {@link Main}'s key
- * bindings invoke.
+ * Owns the window's tabs and exposes the terminal surface as a JavaFX scene graph. Each
+ * terminal pane is mounted as its own node, so JavaFX child order handles stacking and clipping
+ * between panes. The pane model still owns terminals, ptys, cell geometry, and snapshots; this
+ * class handles tab/pane lifecycle, layout, focus, mouse routing, and frame scheduling.
  */
 public final class Compositor {
-    // Canvas background shown wherever no pane covers (gaps). Painted on a full recomposite.
     private static final Color GAP_BACKGROUND = Color.rgb(16, 16, 18);
     private static final Color TAB_TEXT = Color.rgb(225, 229, 235);
-    // Thin tab strip shown at the top when more than one tab is open.
+    private static final Color TAB_INACTIVE_TEXT = Color.rgb(128, 136, 148);
+    private static final Color TAB_ACTIVE_BACKGROUND = Color.rgb(45, 55, 72);
+    private static final Color TAB_INACTIVE_BACKGROUND = Color.rgb(22, 24, 28);
     private static final double TAB_BAR_HEIGHT = 22.0;
 
-    private final Canvas canvas = new Canvas();
+    private final Pane root = new Pane();
+    private final Pane paneLayer = new Pane();
+    private final HBox tabBar = new HBox(1.0);
     private final AppConfig config;
     private final TerminalMetrics metrics;
     private final List<Tab> tabs = new ArrayList<>();
+    private final Map<TerminalPane, TerminalPaneNode> nodes = new HashMap<>();
     private int currentTabIndex;
-    // Bumped on any structural change (tab switch, pane add/close/focus/move) so render()
-    // knows to recomposite. Terminal *content* changes are tracked separately through each
-    // tab's content version.
     private long layoutVersion;
-    // Last content version drawn to the canvas per pane, so a content frame repaints only
-    // the panes that actually changed.
-    private final Map<TerminalPane, Long> paneContentVersion = new HashMap<>();
-    // Cheap per-frame dirty signal: skip the whole render when none of these changed.
     private double lastWidth = -1.0;
     private double lastHeight = -1.0;
     private String lastFontFamily;
@@ -63,22 +62,25 @@ public final class Compositor {
         this.config = config;
         this.metrics = metrics;
         tabs.add(new Tab(config, metrics));
-        canvas.setFocusTraversable(true);
-        canvas.setOnMousePressed(this::handleMousePressed);
-        canvas.setOnMouseReleased(this::handleMouseReleased);
-        canvas.setOnMouseDragged(this::handleMouseDragged);
-        canvas.setOnMouseMoved(this::handleMouseMoved);
-        canvas.setOnScroll(this::handleScroll);
+
+        root.setFocusTraversable(true);
+        root.setBackground(new Background(new BackgroundFill(GAP_BACKGROUND, CornerRadii.EMPTY, null)));
+        root.getChildren().setAll(paneLayer, tabBar);
+        root.setOnMousePressed(event -> root.requestFocus());
     }
 
-    public Canvas canvas() {
-        return canvas;
+    public Parent node() {
+        return root;
+    }
+
+    public void requestFocus() {
+        root.requestFocus();
     }
 
     public void setFont(String family, double size) {
         metrics.setFont(family, size);
-        paneContentVersion.clear();
-        lastWidth = -1.0; // force a redraw on the next frame
+        nodes.values().forEach(TerminalPaneNode::discard);
+        lastWidth = -1.0;
     }
 
     // ---- Tabs and panes -------------------------------------------------------------
@@ -127,8 +129,6 @@ public final class Compositor {
         }
         currentTab().closeActivePane();
         if (currentTab().isEmpty()) {
-            // Closing a tab's last pane closes the tab. When no tabs remain the surface is
-            // empty and Main quits.
             tabs.remove(currentTabIndex);
             if (currentTabIndex >= tabs.size()) {
                 currentTabIndex = Math.max(0, tabs.size() - 1);
@@ -162,6 +162,8 @@ public final class Compositor {
             tab.close();
         }
         tabs.clear();
+        nodes.clear();
+        paneLayer.getChildren().clear();
     }
 
     private Tab currentTab() {
@@ -192,13 +194,9 @@ public final class Compositor {
         }
     }
 
-    // Classify this frame and commit the change trackers. A layout change (size, font,
-    // tab/pane set, z-order, active pane) needs a full recomposite; otherwise a change to the
-    // current tab's content version repaints only the panes that changed; otherwise nothing
-    // changed and the frame is idle.
     private FrameType nextFrameType() {
-        double width = canvas.getWidth();
-        double height = canvas.getHeight();
+        double width = root.getWidth();
+        double height = root.getHeight();
         long contentVersion = tabs.isEmpty() ? 0 : currentTab().contentVersion();
 
         boolean layoutChanged = width != lastWidth || height != lastHeight
@@ -222,93 +220,97 @@ public final class Compositor {
         return FrameType.IDLE;
     }
 
-    // Full recomposite onto the retained canvas: lay the tab out, clear to the gap colour,
-    // draw the tab strip, then paint every pane bottom-to-top (panes() puts the active
-    // floating pane last == on top).
     private void renderLayoutFrame() {
+        double width = root.getWidth();
+        double height = root.getHeight();
         double topInset = tabs.size() > 1 ? TAB_BAR_HEIGHT : 0.0;
+
+        paneLayer.resizeRelocate(0.0, 0.0, width, height);
+        updateTabBar(width, topInset);
+
         if (!tabs.isEmpty()) {
-            currentTab().layout(canvas.getWidth(), canvas.getHeight(), topInset);
+            currentTab().layout(width, height, topInset);
         }
+
         List<TerminalPane> panes = currentPanes();
-        // Sync each pane's ghostty grid to its (possibly new) bounds; a no-op when unchanged.
+        retainNodes(panes);
+        List<TerminalPaneNode> orderedNodes = new ArrayList<>(panes.size());
         for (TerminalPane pane : panes) {
             pane.fitToBounds();
+            TerminalPaneNode node = nodeFor(pane);
+            node.resizeRelocate(Math.round(pane.x()), Math.round(pane.y()), pane.width(), pane.height());
+            node.renderFull(isActive(pane));
+            orderedNodes.add(node);
         }
-
-        GraphicsContext gc = beginFrame();
-        paneContentVersion.keySet().retainAll(panes);
-        gc.setFill(GAP_BACKGROUND);
-        gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
-        if (topInset > 0.0) {
-            drawTabBar(gc, canvas.getWidth(), topInset);
-        }
-        for (TerminalPane pane : panes) {
-            pane.paintFull(gc, isActive(pane));
-            paneContentVersion.put(pane, pane.contentVersion());
-        }
+        paneLayer.getChildren().setAll(orderedNodes);
     }
 
-    // Repaint just the panes whose content changed, directly on the retained canvas. Each pane
-    // clips itself to its rect minus the panes above it, so a lower pane's repaint can't bleed
-    // over one stacked on top — no restore pass needed. Bounds and grids can't have changed
-    // without a layout frame, so a content frame reuses the existing layout untouched.
     private void renderContentFrame() {
-        List<TerminalPane> panes = currentPanes();
-        GraphicsContext gc = beginFrame();
-
-        for (TerminalPane pane : panes) {
-            Long drawn = paneContentVersion.get(pane);
-            if (drawn != null && drawn == pane.contentVersion()) {
-                continue;
+        for (TerminalPane pane : currentPanes()) {
+            TerminalPaneNode node = nodes.get(pane);
+            if (node != null) {
+                node.renderIncremental(isActive(pane));
             }
-            pane.paintIncremental(gc, isActive(pane));
-            paneContentVersion.put(pane, pane.contentVersion());
         }
     }
 
-    private GraphicsContext beginFrame() {
-        GraphicsContext gc = canvas.getGraphicsContext2D();
-        gc.setFontSmoothingType(FontSmoothingType.LCD); // the per-cell renderer relies on LCD
-        return gc;
+    private TerminalPaneNode nodeFor(TerminalPane pane) {
+        return nodes.computeIfAbsent(pane, this::createNode);
     }
 
-    // Thin tab strip: one equal-width segment per tab, the current one highlighted, with a
-    // small 1-based number centred in each segment.
-    private void drawTabBar(GraphicsContext gc, double width, double barHeight) {
-        int count = tabs.size();
-        Font barFont = Font.font(metrics.fontFamily(), Math.max(9.0, Math.min(13.0, barHeight * 0.62)));
-        gc.setFont(barFont);
-        gc.setFontSmoothingType(FontSmoothingType.GRAY);
-        gc.setTextAlign(TextAlignment.CENTER);
-        gc.setTextBaseline(VPos.CENTER);
+    private TerminalPaneNode createNode(TerminalPane pane) {
+        TerminalPaneNode node = new TerminalPaneNode(pane);
+        node.setOnMousePressed(event -> handleMousePressed(pane, event));
+        node.setOnMouseReleased(event -> handleMouseReleased(pane, event));
+        node.setOnMouseDragged(event -> handleMouseDragged(pane, event));
+        node.setOnMouseMoved(event -> handleMouseMoved(pane, event));
+        node.setOnScroll(event -> handleScroll(pane, event));
+        return node;
+    }
 
-        double gap = 1.0;
-        double segmentWidth = width / count;
-        for (int i = 0; i < count; i++) {
-            double x = i * segmentWidth;
+    private void retainNodes(List<TerminalPane> visiblePanes) {
+        Set<TerminalPane> visible = new HashSet<>(visiblePanes);
+        nodes.keySet().removeIf(pane -> !visible.contains(pane));
+    }
+
+    private void updateTabBar(double width, double barHeight) {
+        tabBar.setVisible(barHeight > 0.0);
+        tabBar.setManaged(false);
+        tabBar.resizeRelocate(0.0, 0.0, width, barHeight);
+        tabBar.getChildren().clear();
+        if (barHeight <= 0.0) {
+            return;
+        }
+
+        double segmentWidth = width / tabs.size();
+        for (int i = 0; i < tabs.size(); i++) {
+            Label label = new Label(Integer.toString(i + 1));
             boolean current = i == currentTabIndex;
-            gc.setFill(current ? Color.rgb(45, 55, 72) : Color.rgb(22, 24, 28));
-            gc.fillRect(x, 0.0, segmentWidth - gap, barHeight);
-            gc.setFill(current ? TAB_TEXT : Color.rgb(128, 136, 148));
-            gc.fillText(Integer.toString(i + 1), x + (segmentWidth - gap) / 2.0, barHeight / 2.0);
+            label.setAlignment(Pos.CENTER);
+            label.setTextFill(current ? TAB_TEXT : TAB_INACTIVE_TEXT);
+            label.setBackground(new Background(new BackgroundFill(
+                    current ? TAB_ACTIVE_BACKGROUND : TAB_INACTIVE_BACKGROUND,
+                    CornerRadii.EMPTY,
+                    null)));
+            label.setFont(javafx.scene.text.Font.font(metrics.fontFamily(), Math.max(9.0, Math.min(13.0, barHeight * 0.62))));
+            label.setMinSize(0.0, barHeight);
+            label.setPrefSize(Math.max(0.0, segmentWidth - 1.0), barHeight);
+            label.setMaxSize(Double.MAX_VALUE, barHeight);
+            final int index = i;
+            label.setOnMousePressed(event -> {
+                currentTabIndex = index;
+                layoutVersion++;
+                root.requestFocus();
+                event.consume();
+            });
+            tabBar.getChildren().add(label);
         }
-
-        // Restore the defaults the cell renderer relies on (left-aligned, baseline, LCD).
-        gc.setTextAlign(TextAlignment.LEFT);
-        gc.setTextBaseline(VPos.BASELINE);
-        gc.setFontSmoothingType(FontSmoothingType.LCD);
     }
 
     // ---- Input ----------------------------------------------------------------------
 
-    private void handleMousePressed(MouseEvent event) {
-        canvas.requestFocus();
-        TerminalPane pane = paneAt(event.getX(), event.getY());
-        if (pane == null) {
-            return;
-        }
-
+    private void handleMousePressed(TerminalPane pane, MouseEvent event) {
+        root.requestFocus();
         focus(pane);
         pressedButton = mouseButton(event);
         mouseButtonPressed = true;
@@ -316,58 +318,38 @@ public final class Compositor {
         if (target == null) {
             return;
         }
-        send(pane, target, MouseInput.press(pressedButton, localX(event.getX(), pane, target), localY(event.getY(), pane, target), modifiers(event)), true, event);
+        send(pane, target, MouseInput.press(pressedButton, localX(event.getX(), target), localY(event.getY(), target), modifiers(event)), true, event);
     }
 
-    private void handleMouseReleased(MouseEvent event) {
-        TerminalPane pane = paneAt(event.getX(), event.getY());
-        if (pane == null) {
-            pane = activePane();
-        }
-
+    private void handleMouseReleased(TerminalPane pane, MouseEvent event) {
         MouseButton button = pressedButton == MouseButton.UNKNOWN ? mouseButton(event) : pressedButton;
         MouseTarget target = mouseTarget(pane);
         if (target != null) {
-            send(pane, target, MouseInput.release(button, localX(event.getX(), pane, target), localY(event.getY(), pane, target), modifiers(event)), false, event);
+            send(pane, target, MouseInput.release(button, localX(event.getX(), target), localY(event.getY(), target), modifiers(event)), false, event);
         }
         mouseButtonPressed = false;
         pressedButton = MouseButton.UNKNOWN;
     }
 
-    private void handleMouseDragged(MouseEvent event) {
-        TerminalPane pane = paneAt(event.getX(), event.getY());
-        if (pane == null) {
-            pane = activePane();
-        }
-
+    private void handleMouseDragged(TerminalPane pane, MouseEvent event) {
         MouseButton button = pressedButton == MouseButton.UNKNOWN ? mouseButton(event) : pressedButton;
         MouseTarget target = mouseTarget(pane);
         if (target == null) {
             return;
         }
-        send(pane, target, MouseInput.drag(button, localX(event.getX(), pane, target), localY(event.getY(), pane, target), modifiers(event)), true, event);
+        send(pane, target, MouseInput.drag(button, localX(event.getX(), target), localY(event.getY(), target), modifiers(event)), true, event);
     }
 
-    private void handleMouseMoved(MouseEvent event) {
-        TerminalPane pane = paneAt(event.getX(), event.getY());
-        if (pane == null) {
-            return;
-        }
-
+    private void handleMouseMoved(TerminalPane pane, MouseEvent event) {
         MouseTarget target = mouseTarget(pane);
         if (target == null) {
             return;
         }
-        send(pane, target, MouseInput.motion(localX(event.getX(), pane, target), localY(event.getY(), pane, target), modifiers(event)), mouseButtonPressed, event);
+        send(pane, target, MouseInput.motion(localX(event.getX(), target), localY(event.getY(), target), modifiers(event)), mouseButtonPressed, event);
     }
 
-    private void handleScroll(ScrollEvent event) {
-        TerminalPane pane = paneAt(event.getX(), event.getY());
-        if (pane == null) {
-            return;
-        }
-
-        canvas.requestFocus();
+    private void handleScroll(TerminalPane pane, ScrollEvent event) {
+        root.requestFocus();
         focus(pane);
         int direction = scrollDirection(event);
         if (direction == 0) {
@@ -379,40 +361,25 @@ public final class Compositor {
         MouseTarget target = mouseTarget(pane);
         boolean sent = false;
         if (target != null) {
-            // The wheel sends one button press per scrolled row; resolve the position once.
-            double ex = localX(event.getX(), pane, target);
-            double ey = localY(event.getY(), pane, target);
+            double ex = localX(event.getX(), target);
+            double ey = localY(event.getY(), target);
             KeyModifiers modifiers = modifiers(event);
             for (int i = 0; i < rows; i++) {
                 sent |= send(pane, target, MouseInput.press(wheelButton, ex, ey, modifiers), mouseButtonPressed, event);
             }
         }
         if (!sent) {
-            // Not consumed by the app (e.g. mouse reporting off): scroll the local viewport.
             pane.scrollViewport(direction > 0 ? -rows : rows);
             event.consume();
         }
     }
 
-    // Forward an already-positioned mouse event to the pane, consuming it if the pane (i.e.
-    // the app running in it) acted on it. Returns whether it was sent.
     private boolean send(TerminalPane pane, MouseTarget target, MouseInput input, boolean anyButtonPressed, InputEvent event) {
         boolean sent = pane.sendMouse(input, target.size(), anyButtonPressed);
         if (sent) {
             event.consume();
         }
         return sent;
-    }
-
-    private TerminalPane paneAt(double x, double y) {
-        List<TerminalPane> panes = currentPanes();
-        for (int i = panes.size() - 1; i >= 0; i--) {
-            TerminalPane pane = panes.get(i);
-            if (x >= pane.x() && x < pane.x() + pane.width() && y >= pane.y() && y < pane.y() + pane.height()) {
-                return pane;
-            }
-        }
-        return null;
     }
 
     private MouseTarget mouseTarget(TerminalPane pane) {
@@ -429,14 +396,12 @@ public final class Compositor {
         return new MouseTarget(MouseEncoderSize.of(screenWidth, screenHeight, cellWidth, cellHeight), screenWidth, screenHeight);
     }
 
-    // Resolve a canvas-space pointer position to a pane-local pixel coordinate, clamped to
-    // the pane's reported screen size (what ghostty's mouse encoder expects).
-    private static double localX(double canvasX, TerminalPane pane, MouseTarget target) {
-        return clamp(canvasX - pane.x() - TerminalMetrics.PADDING, 0.0, target.screenWidth() - 1.0);
+    private static double localX(double nodeX, MouseTarget target) {
+        return clamp(nodeX - TerminalMetrics.PADDING, 0.0, target.screenWidth() - 1.0);
     }
 
-    private static double localY(double canvasY, TerminalPane pane, MouseTarget target) {
-        return clamp(canvasY - pane.y() - TerminalMetrics.PADDING, 0.0, target.screenHeight() - 1.0);
+    private static double localY(double nodeY, MouseTarget target) {
+        return clamp(nodeY - TerminalMetrics.PADDING, 0.0, target.screenHeight() - 1.0);
     }
 
     private static double clamp(double value, double min, double max) {
@@ -484,11 +449,10 @@ public final class Compositor {
         };
     }
 
-    // What one render() pass should do, decided from the change trackers in nextFrame().
     private enum FrameType {
-        IDLE,     // nothing changed since the last frame
-        LAYOUT,   // geometry/font/tab/pane set changed: clear and repaint everything
-        CONTENT   // only terminal content changed: repaint the panes that changed
+        IDLE,
+        LAYOUT,
+        CONTENT
     }
 
     private record MouseTarget(MouseEncoderSize size, long screenWidth, long screenHeight) {

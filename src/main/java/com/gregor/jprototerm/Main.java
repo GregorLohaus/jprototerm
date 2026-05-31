@@ -12,7 +12,6 @@ import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.GridPane;
-import javafx.scene.layout.StackPane;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
 
@@ -32,11 +31,7 @@ public final class Main extends Application {
         metrics = new TerminalMetrics(config.fontFamily(), config.fontSize());
         compositor = new Compositor(config, metrics);
 
-        StackPane root = new StackPane(compositor.canvas());
-        compositor.canvas().widthProperty().bind(root.widthProperty());
-        compositor.canvas().heightProperty().bind(root.heightProperty());
-
-        Scene scene = new Scene(root, config.windowWidth(), config.windowHeight());
+        Scene scene = new Scene(compositor.node(), config.windowWidth(), config.windowHeight());
         scene.addEventFilter(KeyEvent.KEY_PRESSED, this::handlePressed);
         scene.addEventFilter(KeyEvent.KEY_TYPED, event -> handleTyped(event));
 
@@ -53,7 +48,7 @@ public final class Main extends Application {
             compositor.close();
         });
         stage.show();
-        compositor.canvas().requestFocus();
+        compositor.requestFocus();
     }
 
     private void handlePressed(KeyEvent event) {
@@ -161,7 +156,7 @@ public final class Main extends Application {
                     config = config.withFont(selectedFamily.trim(), selectedSize);
                     config.save();
                     compositor.setFont(config.fontFamily(), config.fontSize());
-                    compositor.canvas().requestFocus();
+                    compositor.requestFocus();
                 });
     }
 

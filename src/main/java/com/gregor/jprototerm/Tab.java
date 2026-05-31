@@ -1,8 +1,5 @@
 package com.gregor.jprototerm;
 
-import javafx.scene.shape.Rectangle;
-import javafx.scene.shape.Shape;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -112,50 +109,8 @@ final class Tab implements AutoCloseable {
                     floatingHeight);
         }
 
-        assignClips();
-    }
-
-    // Give each pane its clip region for the next paints, so repainting a pane on a content
-    // frame can never bleed over one stacked on top of it. Each pane is clipped to its rect
-    // minus the union of the panes above it: floating panes are clipped by the floating panes
-    // higher in the stack, and tiled panes by the whole floating group. When nothing floats,
-    // every pane clips to its plain bounds.
-    private void assignClips() {
-        if (!floatingVisible || floating.isEmpty()) {
-            tiled.forEach(pane -> pane.setClip(null));
-            floating.forEach(pane -> pane.setClip(null));
-            return;
-        }
-
-        // Floating panes bottom-to-top, matching panes(): insertion order, active pane on top.
-        List<TerminalPane> order = new ArrayList<>(floating.size());
-        for (TerminalPane pane : floating) {
-            if (pane != active) {
-                order.add(pane);
-            }
-        }
-        if (floating.contains(active)) {
-            order.add(active);
-        }
-
-        // Walk top-to-bottom, accumulating the union of the panes above each one.
-        Shape above = null;
-        for (int i = order.size() - 1; i >= 0; i--) {
-            Rectangle rect = rectOf(order.get(i));
-            order.get(i).setClip(above == null ? null : Shape.subtract(rect, above));
-            above = (above == null) ? rect : Shape.union(above, rect);
-        }
-
-        // `above` is now the union of every floating pane; tiled panes sit under all of them.
-        for (TerminalPane pane : tiled) {
-            pane.setClip(Shape.subtract(rectOf(pane), above));
-        }
-    }
-
-    // Match the renderer's pixel snapping (round the origin, keep width/height) so the clip
-    // lines up exactly with where the floating panes are drawn.
-    private static Rectangle rectOf(TerminalPane pane) {
-        return new Rectangle(Math.round(pane.x()), Math.round(pane.y()), pane.width(), pane.height());
+        tiled.forEach(pane -> pane.setClip(null));
+        floating.forEach(pane -> pane.setClip(null));
     }
 
     boolean navigate(Direction direction) {

@@ -244,8 +244,7 @@ public final class Compositor {
             drawTabBar(gc, canvas.getWidth(), topInset);
         }
         for (TerminalPane pane : panes) {
-            pane.paintFull(gc, isActive(pane));
-            paneContentVersion.put(pane, pane.contentVersion());
+            paneContentVersion.put(pane, pane.paintFull(gc, isActive(pane)));
         }
     }
 
@@ -262,8 +261,7 @@ public final class Compositor {
             if (drawn != null && drawn == pane.contentVersion()) {
                 continue;
             }
-            pane.paintIncremental(gc, isActive(pane));
-            paneContentVersion.put(pane, pane.contentVersion());
+            paneContentVersion.put(pane, pane.paintIncremental(gc, isActive(pane)));
         }
     }
 
@@ -384,7 +382,10 @@ public final class Compositor {
             double ey = localY(event.getY(), pane, target);
             KeyModifiers modifiers = modifiers(event);
             for (int i = 0; i < rows; i++) {
-                sent |= send(pane, target, MouseInput.press(wheelButton, ex, ey, modifiers), mouseButtonPressed, event);
+                if (!send(pane, target, MouseInput.press(wheelButton, ex, ey, modifiers), mouseButtonPressed, event)) {
+                    break;
+                }
+                sent = true;
             }
         }
         if (!sent) {

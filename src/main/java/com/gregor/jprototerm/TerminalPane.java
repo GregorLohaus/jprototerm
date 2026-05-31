@@ -16,6 +16,7 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.shape.Shape;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * One terminal: owns its ghostty {@link Terminal}, the {@link ShellSession}/pty driving it,
@@ -49,7 +50,7 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
     private int rows;
     private int pixelWidth;
     private int pixelHeight;
-    private long contentVersion;
+    private final AtomicLong contentVersion = new AtomicLong();
     private long snapshotVersion = -1;
 
     private TerminalPane(Terminal terminal, TerminalMetrics metrics, boolean kittyEnabled,
@@ -169,16 +170,17 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
 
     private RenderStateSnapshot takeSnapshot(boolean full) {
         synchronized (terminal) {
+            long version = contentVersion.get();
             if (full) {
                 renderState.update(terminal);
                 cachedSnapshot = renderState.snapshot();
                 renderState.resetDirty();
-                snapshotVersion = contentVersion;
-            } else if (snapshotVersion != contentVersion) {
+                snapshotVersion = version;
+            } else if (snapshotVersion != version) {
                 renderState.update(terminal);
                 cachedSnapshot = renderState.snapshotIncremental();
                 renderState.resetDirty();
-                snapshotVersion = contentVersion;
+                snapshotVersion = version;
             }
             return cachedSnapshot;
         }
@@ -192,7 +194,7 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
 
     /** This pane's own content revision, bumped on every change (see {@link #refresh()}). */
     public long contentVersion() {
-        return contentVersion;
+        return contentVersion.get();
     }
 
     @Override
@@ -276,18 +278,20 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
         // Mark this pane's content dirty (the snapshot is computed lazily in the paint path,
         // so a burst of writes collapses into one snapshot per frame) and tell the owning tab
         // one of its panes changed.
-        contentVersion++;
+        contentVersion.incrementAndGet();
         onContentChange.run();
     }
 
     /** Paint the whole pane; see {@link TerminalRenderer#paintFull}. */
-    public void paintFull(GraphicsContext gc, boolean active) {
+    public long paintFull(GraphicsContext gc, boolean active) {
         renderer.paintFull(gc, this, active);
+        return snapshotVersion;
     }
 
     /** Repaint what changed; see {@link TerminalRenderer#paintIncremental}. */
-    public void paintIncremental(GraphicsContext gc, boolean active) {
+    public long paintIncremental(GraphicsContext gc, boolean active) {
         renderer.paintIncremental(gc, this, active);
+        return snapshotVersion;
     }
 
     @Override

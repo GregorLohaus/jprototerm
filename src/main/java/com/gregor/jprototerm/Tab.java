@@ -6,6 +6,7 @@ import javafx.scene.shape.Shape;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 
 /**
@@ -33,7 +34,7 @@ final class Tab implements AutoCloseable {
     private double lastTopInset;
     // Bumped whenever one of this tab's panes changes content; the compositor reads the current
     // tab's value each frame as an O(1) "anything to repaint?" check.
-    private long contentVersion;
+    private final AtomicLong contentVersion = new AtomicLong();
 
     Tab(AppConfig config, TerminalMetrics metrics) {
         this.config = config;
@@ -54,7 +55,7 @@ final class Tab implements AutoCloseable {
     }
 
     long contentVersion() {
-        return contentVersion;
+        return contentVersion.get();
     }
 
     /**
@@ -291,7 +292,7 @@ final class Tab implements AutoCloseable {
     }
 
     private void markContentChanged() {
-        contentVersion++;
+        contentVersion.incrementAndGet();
     }
 
     private TerminalPane openPane(boolean asFloating) {

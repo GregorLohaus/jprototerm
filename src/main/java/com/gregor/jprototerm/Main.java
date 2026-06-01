@@ -24,6 +24,10 @@ import java.nio.file.Path;
 import java.util.List;
 
 public final class Main extends Application {
+    // Mouse pointer location captured in main() before JavaFX loads GTK; used to pick the
+    // startup monitor. Reading it later (after GTK) makes AWT's X11 init clash with GDK.
+    private static java.awt.Point startupPointer;
+
     private Compositor compositor;
     private TerminalMetrics metrics;
     private AppConfig config;
@@ -71,19 +75,13 @@ public final class Main extends Application {
     }
 
     private static Screen activeScreen() {
-        try {
-            // AWT is the only way to read the pointer location before any window is shown;
-            // its coordinate space matches JavaFX's on the X11 virtual screen.
-            java.awt.PointerInfo pointer = java.awt.MouseInfo.getPointerInfo();
-            if (pointer != null) {
-                java.awt.Point at = pointer.getLocation();
-                List<Screen> screens = Screen.getScreensForRectangle(at.x, at.y, 1.0, 1.0);
-                if (!screens.isEmpty()) {
-                    return screens.get(0);
-                }
+        java.awt.Point at = startupPointer;
+        if (at != null) {
+            // AWT and JavaFX share a coordinate space on the X11 virtual screen.
+            List<Screen> screens = Screen.getScreensForRectangle(at.x, at.y, 1.0, 1.0);
+            if (!screens.isEmpty()) {
+                return screens.get(0);
             }
-        } catch (Throwable ignored) {
-            // Headless or AWT unavailable — fall back to the primary screen.
         }
         return Screen.getPrimary();
     }
@@ -232,6 +230,19 @@ public final class Main extends Application {
 
     public static void main(String[] args) {
         System.setProperty("prism.order", System.getProperty("prism.order", "es2,sw"));
+        // Initialise AWT and read the pointer here, before launch() loads GTK. Done afterwards,
+        // AWT's X11 init calls XSetErrorHandler while GDK has an error trap pushed and warns.
+        startupPointer = readPointerLocation();
         launch(Main.class, args);
+    }
+
+    private static java.awt.Point readPointerLocation() {
+        try {
+            java.awt.PointerInfo pointer = java.awt.MouseInfo.getPointerInfo();
+            return pointer != null ? pointer.getLocation() : null;
+        } catch (Throwable ignored) {
+            // Headless or AWT unavailable — the startup monitor falls back to the primary screen.
+            return null;
+        }
     }
 }

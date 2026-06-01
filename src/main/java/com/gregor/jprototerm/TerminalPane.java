@@ -69,9 +69,11 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
      * columns and rows fit, and that grid is handed to ghostty and the shell at start-up. A
      * non-positive size falls back to the configured default grid (used before the first
      * layout, when no rect is known yet). The pane owns the shell session it starts and runs
-     * {@code onContentChange} on every content change.
+     * {@code onContentChange} on every content change. The shell starts in {@code workingDirectory}
+     * (e.g. the active pane's cwd), or the user's home when {@code null}.
      */
-    public static TerminalPane create(AppConfig config, TerminalMetrics metrics, Runnable onContentChange, double widthPx, double heightPx) {
+    public static TerminalPane create(AppConfig config, TerminalMetrics metrics, Runnable onContentChange,
+            double widthPx, double heightPx, String workingDirectory) {
         int columns = widthPx > 0 ? metrics.columnsFor(widthPx) : config.columns();
         int rows = heightPx > 0 ? metrics.rowsFor(heightPx) : config.rows();
         Terminal terminal = Ghostty.open(new TerminalOptions(columns, rows, config.maxScrollback()));
@@ -79,7 +81,7 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
         TerminalPane pane = new TerminalPane(terminal, metrics, config.kittyGraphics(), onContentChange,
                 new GhosttyTerminalRenderer(metrics), columns, rows);
         pane.refresh();
-        pane.attach(ShellSession.start(config.shell(), config.envOverride(), pane, columns, rows));
+        pane.attach(ShellSession.start(config.shell(), config.envOverride(), pane, columns, rows, workingDirectory));
         return pane;
     }
 
@@ -203,6 +205,12 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
         synchronized (terminal) {
             return terminal.text();
         }
+    }
+
+    /** Best-effort current working directory of this pane's shell, or {@code null} if unknown. */
+    public String currentWorkingDirectory() {
+        ShellSession current = session;
+        return current != null ? current.currentWorkingDirectory() : null;
     }
 
     /** This pane's own content revision, bumped on every change (see {@link #refresh()}). */

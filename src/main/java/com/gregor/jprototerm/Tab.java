@@ -308,7 +308,10 @@ final class Tab implements AutoCloseable {
             widthPx = lastWidth / (tiled.size() + 1);
             heightPx = availHeight;
         }
-        return TerminalPane.create(config, metrics, this::markContentChanged, widthPx, heightPx);
+        // Open the new pane in the active pane's working directory, so a split/new pane lands
+        // where the user currently is. null (no active pane yet, or cwd unknown) falls back to home.
+        String workingDirectory = active != null ? active.currentWorkingDirectory() : null;
+        return TerminalPane.create(config, metrics, this::markContentChanged, widthPx, heightPx, workingDirectory);
     }
 
     private static boolean directionFilter(Direction direction, TerminalPane current, TerminalPane candidate) {

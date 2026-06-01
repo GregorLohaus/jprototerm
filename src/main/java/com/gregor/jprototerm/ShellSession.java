@@ -20,7 +20,8 @@ public final class ShellSession implements AutoCloseable {
         });
     }
 
-    public static ShellSession start(String shell, Map<String, String> envOverride, TerminalPane pane, int columns, int rows) {
+    public static ShellSession start(String shell, Map<String, String> envOverride, TerminalPane pane,
+            int columns, int rows, String workingDirectory) {
         try {
             Map<String, String> environment = new HashMap<>(System.getenv());
             environment.put("TERM", "xterm-kitty");
@@ -31,7 +32,7 @@ public final class ShellSession implements AutoCloseable {
             LinuxPty pty = LinuxPty.spawn(
                     new String[] {shell, "-i"},
                     environment,
-                    System.getProperty("user.home"));
+                    workingDirectory != null ? workingDirectory : System.getProperty("user.home"));
             ShellSession session = new ShellSession(pty);
             session.resize(columns, rows);
             return session;
@@ -67,6 +68,11 @@ public final class ShellSession implements AutoCloseable {
 
     public void startReading(TerminalPane pane) {
         reader.submit(() -> readOutput(pane));
+    }
+
+    /** Best-effort current working directory of the running shell, or {@code null} if unknown. */
+    public String currentWorkingDirectory() {
+        return closed ? null : pty.currentWorkingDirectory();
     }
 
     public void resize(int columns, int rows) {

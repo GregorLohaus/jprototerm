@@ -9,6 +9,9 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +77,7 @@ public final class LinuxPty implements AutoCloseable {
     private static final long SPAWN_ACTIONS_SIZE = 256;
     private static final long SPAWN_ATTR_SIZE = 512;
 
+    private static final MethodHandle TCGETPGRP = handle("tcgetpgrp", FD_INT_INT);
     private static final MethodHandle POSIX_OPENPT = handle("posix_openpt", FD_INT_INT);
     private static final MethodHandle GRANTPT = handle("grantpt", FD_INT_INT);
     private static final MethodHandle UNLOCKPT = handle("unlockpt", FD_INT_INT);
@@ -202,6 +206,25 @@ public final class LinuxPty implements AutoCloseable {
                 }
                 offset += chunk;
             }
+        }
+    }
+
+    /**
+     * Best-effort current working directory of the terminal's foreground process group, read from
+     * {@code /proc}. This tracks the directory the user is actually in (a {@code cd} in the shell,
+     * or a child program that changed dir), so a newly opened pane can start there. Falls back to
+     * the shell's own pid, and returns {@code null} if it cannot be determined.
+     */
+    public String currentWorkingDirectory() {
+        if (closed) {
+            return null;
+        }
+        int pgid = callInt(TCGETPGRP, masterFd);
+        int target = pgid > 0 ? pgid : pid;
+        try {
+            return Files.readSymbolicLink(Path.of("/proc", Integer.toString(target), "cwd")).toString();
+        } catch (IOException | RuntimeException ex) {
+            return null;
         }
     }
 

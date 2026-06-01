@@ -27,6 +27,8 @@ final class Tab implements AutoCloseable {
     // The floating pane to re-focus when the group is shown again, and to prefer when promoting
     // after the last tiled pane closes.
     private TerminalPane lastFocusedFloating;
+    // The tiled pane to re-focus when the floating group is hidden.
+    private TerminalPane lastFocusedTiled;
     // Last laid-out size, so a newly opened pane can be created at roughly its eventual rect
     // (and thus grid). Seeded from the configured window size for the first pane, which is
     // opened before any layout pass runs.
@@ -193,7 +195,7 @@ final class Tab implements AutoCloseable {
         if (floatingVisible) {
             floatingVisible = false;
             if (floating.contains(active)) {
-                setActive(tiled.get(0));
+                setActive(tiled.contains(lastFocusedTiled) ? lastFocusedTiled : tiled.get(0));
             }
         } else {
             floatingVisible = true;
@@ -273,13 +275,17 @@ final class Tab implements AutoCloseable {
             floatingVisible = false;
         }
 
-        setActive(wasFloating && floatingVisible ? floating.get(floating.size() - 1) : tiled.get(0));
+        setActive(wasFloating && floatingVisible
+                ? floating.get(floating.size() - 1)
+                : tiled.contains(lastFocusedTiled) ? lastFocusedTiled : tiled.get(0));
     }
 
     private void setActive(TerminalPane pane) {
         active = pane;
         if (floating.contains(pane)) {
             lastFocusedFloating = pane;
+        } else if (tiled.contains(pane)) {
+            lastFocusedTiled = pane;
         }
     }
 

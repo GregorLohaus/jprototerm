@@ -156,7 +156,10 @@ public final class Compositor {
     }
 
     public void newTab() {
-        tabs.add(new Tab(config, metrics));
+        // Open the new tab in the currently active pane's working directory, so it lands where the
+        // user currently is rather than always in home.
+        String workingDirectory = isEmpty() ? null : currentTab().activePane().currentWorkingDirectory();
+        tabs.add(new Tab(config, metrics, workingDirectory));
         currentTabIndex = tabs.size() - 1;
         layoutVersion++;
     }

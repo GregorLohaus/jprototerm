@@ -23,6 +23,7 @@ final class Tab implements AutoCloseable {
     private final List<TerminalPane> floating = new ArrayList<>();
     private boolean floatingVisible;
     private TerminalPane active;
+    private final String initialWorkingDirectory;
     // The floating pane to re-focus when the group is shown again, and to prefer when promoting
     // after the last tiled pane closes.
     private TerminalPane lastFocusedFloating;
@@ -37,10 +38,19 @@ final class Tab implements AutoCloseable {
     private final AtomicLong contentVersion = new AtomicLong();
 
     Tab(AppConfig config, TerminalMetrics metrics) {
+        this(config, metrics, null);
+    }
+
+    /**
+     * Creates a tab whose first pane starts in {@code initialWorkingDirectory} (e.g. the cwd of the
+     * pane that was active when this tab was opened), or the user's home when {@code null}.
+     */
+    Tab(AppConfig config, TerminalMetrics metrics, String initialWorkingDirectory) {
         this.config = config;
         this.metrics = metrics;
         this.lastWidth = config.windowWidth();
         this.lastHeight = config.windowHeight();
+        this.initialWorkingDirectory = initialWorkingDirectory;
         TerminalPane first = openPane(false);
         tiled.add(first);
         active = first;
@@ -309,8 +319,9 @@ final class Tab implements AutoCloseable {
             heightPx = availHeight;
         }
         // Open the new pane in the active pane's working directory, so a split/new pane lands
-        // where the user currently is. null (no active pane yet, or cwd unknown) falls back to home.
-        String workingDirectory = active != null ? active.currentWorkingDirectory() : null;
+        // where the user currently is. With no active pane yet (the tab's first pane), fall back to
+        // the directory this tab was opened in. null (cwd unknown) falls back to home downstream.
+        String workingDirectory = active != null ? active.currentWorkingDirectory() : initialWorkingDirectory;
         return TerminalPane.create(config, metrics, this::markContentChanged, widthPx, heightPx, workingDirectory);
     }
 

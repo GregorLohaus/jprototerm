@@ -222,6 +222,22 @@ final class Tab implements AutoCloseable {
         setActive(floating.get((current + 1 + floating.size()) % floating.size()));
     }
 
+    /** Promotes the active floating pane to a tiled pane, joining the tiled row. No-op otherwise. */
+    void promoteActiveFloating() {
+        TerminalPane promote = active;
+        if (!floating.remove(promote)) {
+            return; // active pane is tiled (or there is none); nothing to promote
+        }
+        if (promote == lastFocusedFloating) {
+            lastFocusedFloating = floating.isEmpty() ? null : floating.get(floating.size() - 1);
+        }
+        tiled.add(promote);
+        if (floating.isEmpty()) {
+            floatingVisible = false;
+        }
+        setActive(promote);
+    }
+
     void closeActivePane() {
         TerminalPane closing = active;
         boolean wasFloating = floating.remove(closing);

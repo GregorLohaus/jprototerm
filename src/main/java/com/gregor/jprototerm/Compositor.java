@@ -139,6 +139,14 @@ public final class Compositor {
         layoutVersion++;
     }
 
+    public void promoteActiveFloating() {
+        if (isEmpty()) {
+            return;
+        }
+        currentTab().promoteActiveFloating();
+        layoutVersion++;
+    }
+
     public void closeActivePane() {
         if (isEmpty()) {
             return;

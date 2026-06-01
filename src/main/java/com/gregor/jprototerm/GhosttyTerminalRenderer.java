@@ -1,8 +1,8 @@
 package com.gregor.jprototerm;
 
+import dev.jlibghostty.KittyImage;
 import dev.jlibghostty.KittyImageCompression;
 import dev.jlibghostty.KittyImageFormat;
-import dev.jlibghostty.KittyImageSnapshot;
 import dev.jlibghostty.KittyPlacement;
 import dev.jlibghostty.KittyPlacementLayer;
 import dev.jlibghostty.KittyPlaceholder;
@@ -461,7 +461,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
 
     private static boolean hasKittyGraphics(RenderTarget target) {
         return target.kittyGraphics()
-                .map(graphics -> !graphics.placements().isEmpty())
+                .map(graphics -> !graphics.isEmpty())
                 .orElse(false);
     }
 
@@ -601,16 +601,17 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     }
 
     private Image imageFor(KittyPlacement placement) {
-        return placement.image().map(snapshot -> {
-            byte[] data = snapshot.data();
-            KittyImageKey key = KittyImageKey.of(snapshot, data);
+        return placement.image().map(image -> {
+            // Build the cache key from cheap metadata only — the pixel buffer is never copied out
+            // of native memory on a cache hit (the common per-frame case).
+            KittyImageKey key = KittyImageKey.of(image);
             Image cached = kittyImageCache.get(key);
             if (cached != null) {
                 return cached;
             }
 
-            kittyImageCache.keySet().removeIf(existing -> existing.id() == snapshot.id());
-            Image decoded = decodeImage(snapshot, data);
+            kittyImageCache.keySet().removeIf(existing -> existing.id() == image.id());
+            Image decoded = decodeImage(image);
             if (decoded != null) {
                 kittyImageCache.put(key, decoded);
             }
@@ -618,22 +619,25 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         }).orElse(null);
     }
 
-    private Image decodeImage(KittyImageSnapshot snapshot, byte[] data) {
-        if (snapshot.compression() != KittyImageCompression.NONE) {
+    private Image decodeImage(KittyImage source) {
+        if (source.compression() != KittyImageCompression.NONE) {
             return null;
         }
 
-        if (snapshot.format() == KittyImageFormat.PNG) {
+        // Only now — on a cache miss — do we pull the raw bytes across the native boundary.
+        byte[] data = source.data();
+        KittyImageFormat format = source.format();
+        if (format == KittyImageFormat.PNG) {
             return new Image(new ByteArrayInputStream(data));
         }
 
-        int width = Math.toIntExact(snapshot.width());
-        int height = Math.toIntExact(snapshot.height());
+        int width = Math.toIntExact(source.width());
+        int height = Math.toIntExact(source.height());
         WritableImage image = new WritableImage(width, height);
 
-        if (snapshot.format() == KittyImageFormat.RGBA) {
+        if (format == KittyImageFormat.RGBA) {
             image.getPixelWriter().setPixels(0, 0, width, height, PixelFormat.getByteBgraInstance(), rgbaToBgra(data), 0, width * 4);
-        } else if (snapshot.format() == KittyImageFormat.RGB) {
+        } else if (format == KittyImageFormat.RGB) {
             image.getPixelWriter().setPixels(0, 0, width, height, PixelFormat.getByteRgbInstance(), data, 0, width * 3);
         }
         return image;
@@ -1321,15 +1325,15 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     // identity + dimensions + payload length are enough to key the decoded-image cache, and
     // we avoid fingerprinting the whole payload — which previously ran once per frame per
     // placement (O(image size)) just to look the image up.
-    private record KittyImageKey(long id, long number, long width, long height, KittyImageFormat format, int dataLength) {
-        private static KittyImageKey of(KittyImageSnapshot snapshot, byte[] data) {
+    private record KittyImageKey(long id, long number, long width, long height, KittyImageFormat format, long dataLength) {
+        private static KittyImageKey of(KittyImage image) {
             return new KittyImageKey(
-                    snapshot.id(),
-                    snapshot.number(),
-                    snapshot.width(),
-                    snapshot.height(),
-                    snapshot.format(),
-                    data.length
+                    image.id(),
+                    image.number(),
+                    image.width(),
+                    image.height(),
+                    image.format(),
+                    image.dataLength()
             );
         }
     }

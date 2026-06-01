@@ -3,6 +3,7 @@ package com.gregor.jprototerm;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.geometry.Rectangle2D;
 import javafx.scene.Scene;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
@@ -14,11 +15,13 @@ import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.text.Font;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 public final class Main extends Application {
     private Compositor compositor;
@@ -52,8 +55,37 @@ public final class Main extends Application {
         stage.setOnCloseRequest(event -> {
             compositor.close();
         });
+        // JavaFX centres a new stage on the primary screen; on X11 there's no "focused monitor"
+        // to honour, so place it on the screen under the mouse pointer instead.
+        centreOnActiveScreen(stage, config.windowWidth(), config.windowHeight());
         stage.show();
         compositor.canvas().requestFocus();
+    }
+
+    // Centre the stage within the screen the mouse pointer is on (the best proxy for the
+    // "active" monitor on X11, which exposes no focused-monitor concept to JavaFX).
+    private static void centreOnActiveScreen(Stage stage, double width, double height) {
+        Rectangle2D bounds = activeScreen().getVisualBounds();
+        stage.setX(bounds.getMinX() + ((bounds.getWidth() - width) / 2.0));
+        stage.setY(bounds.getMinY() + ((bounds.getHeight() - height) / 2.0));
+    }
+
+    private static Screen activeScreen() {
+        try {
+            // AWT is the only way to read the pointer location before any window is shown;
+            // its coordinate space matches JavaFX's on the X11 virtual screen.
+            java.awt.PointerInfo pointer = java.awt.MouseInfo.getPointerInfo();
+            if (pointer != null) {
+                java.awt.Point at = pointer.getLocation();
+                List<Screen> screens = Screen.getScreensForRectangle(at.x, at.y, 1.0, 1.0);
+                if (!screens.isEmpty()) {
+                    return screens.get(0);
+                }
+            }
+        } catch (Throwable ignored) {
+            // Headless or AWT unavailable — fall back to the primary screen.
+        }
+        return Screen.getPrimary();
     }
 
     private void handlePressed(KeyEvent event) {

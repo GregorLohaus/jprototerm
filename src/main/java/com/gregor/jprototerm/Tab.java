@@ -286,6 +286,9 @@ final class Tab implements AutoCloseable {
             lastFocusedFloating = pane;
         } else if (tiled.contains(pane)) {
             lastFocusedTiled = pane;
+            // A tiled pane gaining focus hides the floating group: leaving it shown while a tiled
+            // pane is active strands focus behind the overlay and disables navigation.
+            floatingVisible = false;
         }
     }
 

@@ -59,6 +59,10 @@ public final class Main extends Application {
         // to honour, so place it on the screen under the mouse pointer instead.
         centreOnActiveScreen(stage, config.windowWidth(), config.windowHeight());
         stage.show();
+        // Ask the window manager to raise and focus the new window so the user can type right
+        // away; the canvas requestFocus() below only routes events within the scene.
+        stage.toFront();
+        stage.requestFocus();
         compositor.canvas().requestFocus();
     }
 

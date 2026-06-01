@@ -32,7 +32,7 @@ public final class Main extends Application {
         metrics = new TerminalMetrics(config.fontFamily(), config.fontSize());
         compositor = new Compositor(config, metrics);
 
-        StackPane root = new StackPane(compositor.canvas());
+        StackPane root = new StackPane(compositor.canvas(), compositor.imageOverlay());
         compositor.canvas().widthProperty().bind(root.widthProperty());
         compositor.canvas().heightProperty().bind(root.heightProperty());
 

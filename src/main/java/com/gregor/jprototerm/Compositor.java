@@ -5,6 +5,7 @@ import dev.jlibghostty.MouseButton;
 import dev.jlibghostty.MouseEncoderSize;
 import dev.jlibghostty.MouseInput;
 import javafx.geometry.VPos;
+import javafx.scene.Node;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.input.InputEvent;
@@ -38,6 +39,8 @@ public final class Compositor {
     private static final double TAB_BAR_HEIGHT = 22.0;
 
     private final Canvas canvas = new Canvas();
+    // Kitty images are drawn as retained nodes layered over the canvas, not composited onto it.
+    private final KittyImageOverlay imageOverlay = new KittyImageOverlay();
     private final AppConfig config;
     private final TerminalMetrics metrics;
     private final List<Tab> tabs = new ArrayList<>();
@@ -73,6 +76,11 @@ public final class Compositor {
 
     public Canvas canvas() {
         return canvas;
+    }
+
+    /** The kitty-image overlay, to be stacked directly above {@link #canvas()} in the window. */
+    public Node imageOverlay() {
+        return imageOverlay.node();
     }
 
     public void setFont(String family, double size) {
@@ -256,6 +264,7 @@ public final class Compositor {
         for (TerminalPane pane : panes) {
             paneContentVersion.put(pane, pane.paintFull(gc, isActive(pane)));
         }
+        imageOverlay.sync(panes);
     }
 
     // Repaint just the panes whose content changed, directly on the retained canvas. Each pane
@@ -272,6 +281,7 @@ public final class Compositor {
                 continue;
             }
             paneContentVersion.put(pane, pane.paintIncremental(gc, isActive(pane)));
+            imageOverlay.updatePane(pane);
         }
     }
 

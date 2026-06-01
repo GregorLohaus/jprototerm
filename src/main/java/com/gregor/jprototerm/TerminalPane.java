@@ -294,6 +294,14 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
         return snapshotVersion;
     }
 
+    /**
+     * Kitty image placements from the most recent paint, in scene coordinates. The compositor
+     * renders these as overlay nodes clipped to this pane (see {@link KittyImageOverlay}).
+     */
+    public java.util.List<KittyImageNode> kittyImages() {
+        return renderer.kittyImages();
+    }
+
     @Override
     public void close() {
         if (session != null) {

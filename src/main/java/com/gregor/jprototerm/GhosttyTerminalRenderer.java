@@ -27,6 +27,7 @@ import javafx.scene.text.Text;
 
 import java.io.ByteArrayInputStream;
 import java.nio.IntBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -60,6 +61,9 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     // Decoded kitty images for this renderer's pane (kitty graphics state is per-terminal).
     private final Map<KittyImageKey, Image> kittyImageCache = new HashMap<>();
     private final SoftwareBackbuffer software = new SoftwareBackbuffer();
+    // Image placements produced by the last paint; the compositor reads these and renders them
+    // as overlay nodes rather than compositing them onto the canvas. Empty for non-kitty panes.
+    private List<KittyImageNode> kittyImageNodes = List.of();
 
     GhosttyTerminalRenderer(TerminalMetrics metrics) {
         this.metrics = metrics;
@@ -73,15 +77,10 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         double height = target.height();
         gc.save();
         clip(gc, px, py, width, height, target.clip());
-        boolean withKitty = target.kittyEnabled() && hasKittyGraphics(target);
         RenderStateSnapshot snapshot = target.snapshotFull();
-        if (withKitty) {
-            drawContent(gc, target, snapshot, px, py, width, height, active, true);
-            software.invalidate();
-        } else {
-            software.paintFull(gc, snapshot, px, py, width, height, active);
-        }
+        software.paintFull(gc, snapshot, px, py, width, height, active);
         gc.restore();
+        collectKittyImages(target, snapshot, px, py);
     }
 
     @Override
@@ -93,71 +92,30 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         gc.save();
         clip(gc, px, py, width, height, target.clip());
         if (target.kittyEnabled() && hasKittyGraphics(target)) {
-            // Kitty placements can move without a per-row dirty flag, so always redraw whole.
-            drawContent(gc, target, target.snapshotFull(), px, py, width, height, active, true);
-            software.invalidate();
-        } else {
-            RenderStateSnapshot snapshot = target.snapshot();
-            int dirty = snapshot == null ? DIRTY_FULL : snapshot.dirty();
-            if (dirty == DIRTY_FULL) {
-                software.paintFullOrShifted(gc, target.snapshotFull(), px, py, width, height, active);
-            } else if (dirty == DIRTY_PARTIAL) {
-                software.paintDirty(gc, target, snapshot, px, py, width, height, active);
-            }
-            // dirty == FALSE: nothing visible changed.
+            // Images render as overlay nodes, not on the canvas, but their positions track the
+            // grid (scroll/cursor), so we need a full snapshot to locate placeholder cells. The
+            // software path itself still repaints only the text rows whose hash changed.
+            RenderStateSnapshot snapshot = target.snapshotFull();
+            software.paintFullOrShifted(gc, snapshot, px, py, width, height, active);
+            gc.restore();
+            collectKittyImages(target, snapshot, px, py);
+            return;
         }
+        RenderStateSnapshot snapshot = target.snapshot();
+        int dirty = snapshot == null ? DIRTY_FULL : snapshot.dirty();
+        if (dirty == DIRTY_FULL) {
+            software.paintFullOrShifted(gc, target.snapshotFull(), px, py, width, height, active);
+        } else if (dirty == DIRTY_PARTIAL) {
+            software.paintDirty(gc, target, snapshot, px, py, width, height, active);
+        }
+        // dirty == FALSE: nothing visible changed.
         gc.restore();
+        kittyImageNodes = List.of();
     }
 
-    // Full content render: background, border, all rows, cursor, and (when enabled) kitty
-    // graphics. Used by the kitty direct path and by full redraws.
-    private void drawContent(
-            GraphicsContext gc,
-            RenderTarget target,
-            RenderStateSnapshot snapshot,
-            double x,
-            double y,
-            double width,
-            double height,
-            boolean active,
-            boolean withKitty
-    ) {
-        double cellWidth = metrics.cellWidth();
-        double lineHeight = metrics.lineHeight();
-        gc.setFontSmoothingType(FontSmoothingType.LCD);
-        gc.setFill(PANE_BACKGROUND);
-        gc.fillRect(x, y, width, height);
-        gc.setFont(metrics.font());
-
-        double left = x + TerminalMetrics.PADDING;
-        double top = y + TerminalMetrics.PADDING;
-        double baseline = top + metrics.baselineOffset();
-
-        Map<KittyPlaceholderKey, KittyPlaceholderBounds> placeholderBounds = withKitty
-                ? kittyPlaceholderBounds(snapshot)
-                : Map.of();
-
-        if (withKitty) {
-            drawKittyGraphics(gc, target, KittyPlacementLayer.BELOW_TEXT, placeholderBounds, left, top, cellWidth, lineHeight);
-        }
-
-        if (snapshot != null) {
-            double contentBottom = top + snapshot.rows() * lineHeight;
-            fillVerticalPadding(gc, snapshot, x, y, width, height, top, contentBottom);
-            for (RenderRow row : snapshot.renderRows()) {
-                double y0 = Math.floor(top + (row.row() * lineHeight));
-                double y1 = Math.ceil(top + ((row.row() + 1) * lineHeight));
-                paintSidePadding(gc, row, x, width, left, cellWidth, y0, y1 - y0);
-                drawRow(gc, row, left, top, baseline, cellWidth, lineHeight);
-            }
-            drawCursor(gc, snapshot, left, top, cellWidth, lineHeight);
-        }
-
-        if (withKitty) {
-            drawKittyGraphics(gc, target, KittyPlacementLayer.ABOVE_TEXT, placeholderBounds, left, top, cellWidth, lineHeight);
-        }
-
-        drawBorder(gc, x, y, width, height, active);
+    @Override
+    List<KittyImageNode> kittyImages() {
+        return kittyImageNodes;
     }
 
     // Incremental render: repaint only the rows ghostty flagged dirty, then restore the
@@ -465,15 +423,34 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                 .orElse(false);
     }
 
-    private void drawKittyGraphics(
-            GraphicsContext gc,
+    // Build the image-node descriptors for the current frame. Reads the decoded-image cache and
+    // each placement's geometry, but draws nothing — the compositor turns these into overlay
+    // nodes clipped to the pane.
+    private void collectKittyImages(RenderTarget target, RenderStateSnapshot snapshot, double px, double py) {
+        if (!target.kittyEnabled() || !hasKittyGraphics(target)) {
+            kittyImageNodes = List.of();
+            return;
+        }
+        double cellWidth = metrics.cellWidth();
+        double lineHeight = metrics.lineHeight();
+        double originX = px + TerminalMetrics.PADDING;
+        double originY = py + TerminalMetrics.PADDING;
+        Map<KittyPlaceholderKey, KittyPlaceholderBounds> placeholderBounds = kittyPlaceholderBounds(snapshot);
+        List<KittyImageNode> nodes = new ArrayList<>();
+        collectLayer(target, KittyPlacementLayer.BELOW_TEXT, placeholderBounds, originX, originY, cellWidth, lineHeight, nodes);
+        collectLayer(target, KittyPlacementLayer.ABOVE_TEXT, placeholderBounds, originX, originY, cellWidth, lineHeight, nodes);
+        kittyImageNodes = nodes;
+    }
+
+    private void collectLayer(
             RenderTarget target,
             KittyPlacementLayer layer,
             Map<KittyPlaceholderKey, KittyPlaceholderBounds> placeholderBounds,
             double originX,
             double originY,
             double cellWidth,
-            double lineHeight
+            double lineHeight,
+            List<KittyImageNode> out
     ) {
         target.kittyGraphics().ifPresent(graphics -> {
             for (KittyPlacement placement : graphics.placements(layer)) {
@@ -482,17 +459,17 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                     continue;
                 }
 
-                if (placement.virtual()) {
-                    drawVirtualKittyPlacement(gc, placement, image, placeholderBounds, originX, originY, cellWidth, lineHeight);
-                } else {
-                    drawPinnedKittyPlacement(gc, placement, image, originX, originY, cellWidth, lineHeight);
+                KittyImageNode node = placement.virtual()
+                        ? virtualNode(placement, image, placeholderBounds, originX, originY, cellWidth, lineHeight)
+                        : pinnedNode(placement, image, originX, originY, cellWidth, lineHeight);
+                if (node != null) {
+                    out.add(node);
                 }
             }
         });
     }
 
-    private static void drawPinnedKittyPlacement(
-            GraphicsContext gc,
+    private static KittyImageNode pinnedNode(
             KittyPlacement placement,
             Image image,
             double originX,
@@ -502,15 +479,13 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     ) {
         KittyRenderInfo renderInfo = placement.renderInfo().orElse(null);
         if (renderInfo == null || !renderInfo.viewportVisible()) {
-            return;
+            return null;
         }
 
-        double sourceX = renderInfo.sourceX();
-        double sourceY = renderInfo.sourceY();
         double sourceWidth = renderInfo.sourceWidth();
         double sourceHeight = renderInfo.sourceHeight();
         if (sourceWidth <= 0.0 || sourceHeight <= 0.0) {
-            return;
+            return null;
         }
 
         double x = originX + (renderInfo.viewportColumn() * cellWidth) + placement.xOffset();
@@ -518,14 +493,14 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         double width = renderInfo.pixelWidth() > 0 ? renderInfo.pixelWidth() : renderInfo.gridColumns() * cellWidth;
         double height = renderInfo.pixelHeight() > 0 ? renderInfo.pixelHeight() : renderInfo.gridRows() * lineHeight;
         if (width <= 0.0 || height <= 0.0) {
-            return;
+            return null;
         }
 
-        gc.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height);
+        return new KittyImageNode(placement.imageId(), placement.placementId(), image,
+                renderInfo.sourceX(), renderInfo.sourceY(), sourceWidth, sourceHeight, x, y, width, height);
     }
 
-    private static void drawVirtualKittyPlacement(
-            GraphicsContext gc,
+    private static KittyImageNode virtualNode(
             KittyPlacement placement,
             Image image,
             Map<KittyPlaceholderKey, KittyPlaceholderBounds> placeholderBounds,
@@ -546,12 +521,12 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                     .orElse(null);
         }
         if (bounds == null || bounds.isEmpty()) {
-            return;
+            return null;
         }
 
         SourceRect source = sourceRect(placement, image);
         if (source.width() <= 0.0 || source.height() <= 0.0) {
-            return;
+            return null;
         }
 
         long gridColumns = gridColumns(placement, bounds);
@@ -569,13 +544,14 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         double availableHeight = bounds.rows() * lineHeight;
 
         if (sourceWidth <= 0.0 || sourceHeight <= 0.0 || availableWidth <= 0.0 || availableHeight <= 0.0) {
-            return;
+            return null;
         }
 
         double scale = Math.min(availableWidth / sourceWidth, availableHeight / sourceHeight);
         double width = sourceWidth * scale;
         double height = sourceHeight * scale;
-        gc.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height);
+        return new KittyImageNode(placement.imageId(), placement.placementId(), image,
+                sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height);
     }
 
     private static long gridColumns(KittyPlacement placement, KittyPlaceholderBounds bounds) {

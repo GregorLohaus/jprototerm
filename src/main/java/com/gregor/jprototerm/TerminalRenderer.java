@@ -25,6 +25,14 @@ abstract class TerminalRenderer {
     /** Repaint only what changed since the last frame, clipped to the target's clip region. */
     abstract void paintIncremental(GraphicsContext gc, RenderTarget target, boolean active);
 
+    /**
+     * The kitty image placements produced by the most recent paint, for the compositor to render
+     * as overlay nodes above the canvas. Empty unless the last paint found visible images.
+     */
+    java.util.List<KittyImageNode> kittyImages() {
+        return java.util.List.of();
+    }
+
     protected static void clipRect(GraphicsContext gc, double x, double y, double width, double height) {
         gc.beginPath();
         gc.rect(x, y, width, height);

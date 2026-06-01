@@ -34,9 +34,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The real terminal renderer: paints a pane's background, cell rows, cursor, border, padding
- * and (when enabled) kitty graphics. One instance per pane, since it caches that pane's
- * decoded kitty images.
+ * The real terminal renderer: rasterizes a pane's background, cell rows, cursor, border and
+ * padding into the {@link SoftwareBackbuffer} and blits it to the canvas. Kitty images are not
+ * drawn here — each paint collects their placements (see {@link #kittyImages()}) for the
+ * compositor to render as overlay nodes above the canvas. One instance per pane, since it caches
+ * that pane's decoded kitty images.
  */
 final class GhosttyTerminalRenderer extends TerminalRenderer {
     // GhosttyRenderStateDirty values (stable C ABI; see ghostty/vt/render.h).

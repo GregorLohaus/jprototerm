@@ -58,9 +58,13 @@ final class KittyImageOverlay {
         for (TerminalPane pane : panes) {
             updatePane(pane);
         }
+        // Only panes that actually have images get a group; order those to match pane z-order.
         List<Node> ordered = new ArrayList<>(panes.size());
         for (TerminalPane pane : panes) {
-            ordered.add(overlays.get(pane).group);
+            PaneOverlay overlay = overlays.get(pane);
+            if (overlay != null) {
+                ordered.add(overlay.group);
+            }
         }
         if (!root.getChildren().equals(ordered)) {
             root.getChildren().setAll(ordered);

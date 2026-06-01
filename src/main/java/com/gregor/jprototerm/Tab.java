@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
@@ -19,6 +20,9 @@ import java.util.stream.Stream;
 final class Tab implements AutoCloseable {
     private final AppConfig config;
     private final TerminalMetrics metrics;
+    // Notified (on the FX thread) when one of this tab's panes' process exits on its own, so the
+    // compositor can close that pane and reap the tab/app if it was the last one.
+    private final Consumer<TerminalPane> onPaneExit;
     private final List<TerminalPane> tiled = new ArrayList<>();
     private final List<TerminalPane> floating = new ArrayList<>();
     private boolean floatingVisible;
@@ -39,17 +43,19 @@ final class Tab implements AutoCloseable {
     // tab's value each frame as an O(1) "anything to repaint?" check.
     private final AtomicLong contentVersion = new AtomicLong();
 
-    Tab(AppConfig config, TerminalMetrics metrics) {
-        this(config, metrics, null);
+    Tab(AppConfig config, TerminalMetrics metrics, Consumer<TerminalPane> onPaneExit) {
+        this(config, metrics, null, onPaneExit);
     }
 
     /**
      * Creates a tab whose first pane starts in {@code initialWorkingDirectory} (e.g. the cwd of the
      * pane that was active when this tab was opened), or the user's home when {@code null}.
      */
-    Tab(AppConfig config, TerminalMetrics metrics, String initialWorkingDirectory) {
+    Tab(AppConfig config, TerminalMetrics metrics, String initialWorkingDirectory,
+            Consumer<TerminalPane> onPaneExit) {
         this.config = config;
         this.metrics = metrics;
+        this.onPaneExit = onPaneExit;
         this.lastWidth = config.windowWidth();
         this.lastHeight = config.windowHeight();
         this.initialWorkingDirectory = initialWorkingDirectory;
@@ -241,19 +247,35 @@ final class Tab implements AutoCloseable {
     }
 
     void closeActivePane() {
-        TerminalPane closing = active;
-        boolean wasFloating = floating.remove(closing);
-        if (!wasFloating) {
-            tiled.remove(closing);
+        if (active != null) {
+            closePane(active);
         }
+    }
+
+    /**
+     * Closes {@code closing} (the active pane on a key-bound close, or any pane whose process just
+     * exited) and re-selects the active pane only when the one that closed was active. Returns
+     * false when the pane is not in this tab. Leaves the tab empty ({@code active == null}) when its
+     * last pane closes, so the compositor can drop it.
+     */
+    boolean closePane(TerminalPane closing) {
+        boolean wasFloating = floating.remove(closing);
+        boolean wasTiled = !wasFloating && tiled.remove(closing);
+        if (!wasFloating && !wasTiled) {
+            return false; // not one of this tab's panes (already gone)
+        }
+        boolean wasActive = closing == active;
         if (closing == lastFocusedFloating) {
             lastFocusedFloating = null;
+        }
+        if (closing == lastFocusedTiled) {
+            lastFocusedTiled = null;
         }
         closing.close();
 
         if (tiled.isEmpty() && floating.isEmpty()) {
             active = null; // tab is now empty; the compositor drops it
-            return;
+            return true;
         }
 
         // Always keep a tiled base: if the last tiled pane just closed, promote a floating one
@@ -265,19 +287,21 @@ final class Tab implements AutoCloseable {
             floating.remove(promote);
             tiled.add(promote);
             if (promote == lastFocusedFloating) {
-                lastFocusedFloating = null;
-                if (!floating.isEmpty()) {
-                    lastFocusedFloating = floating.isEmpty() ? null : floating.get(nextFocussed);
-                }
+                lastFocusedFloating = floating.isEmpty() ? null : floating.get(nextFocussed);
             }
         }
         if (floating.isEmpty()) {
             floatingVisible = false;
         }
 
-        setActive(wasFloating && floatingVisible
-                ? floating.get(floating.size() - 1)
-                : tiled.contains(lastFocusedTiled) ? lastFocusedTiled : tiled.get(0));
+        // Only the active pane closing forces a re-selection; closing a background pane (e.g. one
+        // whose process exited while another is focused) leaves focus where it is.
+        if (wasActive) {
+            setActive(wasFloating && floatingVisible
+                    ? floating.get(floating.size() - 1)
+                    : tiled.contains(lastFocusedTiled) ? lastFocusedTiled : tiled.get(0));
+        }
+        return true;
     }
 
     private void setActive(TerminalPane pane) {
@@ -293,7 +317,20 @@ final class Tab implements AutoCloseable {
     }
 
     TerminalPane createFloatingPane() {
-        TerminalPane pane = openPane(true);
+        return addFloating(openPane(true));
+    }
+
+    /**
+     * Opens a floating pane whose process runs {@code command} directly (auto-closing when it
+     * exits), rather than an interactive shell. Used for one-shot panes like the scrollback editor.
+     */
+    TerminalPane createFloatingPane(String command) {
+        double[] size = paneSize(true);
+        return addFloating(register(TerminalPane.createWithCommand(
+                config, metrics, this::markContentChanged, size[0], size[1], paneWorkingDirectory(), command)));
+    }
+
+    private TerminalPane addFloating(TerminalPane pane) {
         floating.add(pane);
         floatingVisible = true;
         setActive(pane);
@@ -332,22 +369,31 @@ final class Tab implements AutoCloseable {
     }
 
     private TerminalPane openPane(boolean asFloating) {
+        double[] size = paneSize(asFloating);
+        return register(TerminalPane.create(
+                config, metrics, this::markContentChanged, size[0], size[1], paneWorkingDirectory()));
+    }
+
+    private double[] paneSize(boolean asFloating) {
         double availHeight = lastHeight - lastTopInset;
-        double widthPx;
-        double heightPx;
         if (asFloating) {
-            widthPx = Math.max(420, lastWidth * 0.58);
-            heightPx = Math.max(260, availHeight * 0.58);
-        } else {
-            // A new tiled pane joins the row, so each gets 1/(n+1) of the width.
-            widthPx = lastWidth / (tiled.size() + 1);
-            heightPx = availHeight;
+            return new double[] {Math.max(420, lastWidth * 0.58), Math.max(260, availHeight * 0.58)};
         }
-        // Open the new pane in the active pane's working directory, so a split/new pane lands
-        // where the user currently is. With no active pane yet (the tab's first pane), fall back to
-        // the directory this tab was opened in. null (cwd unknown) falls back to home downstream.
-        String workingDirectory = active != null ? active.currentWorkingDirectory() : initialWorkingDirectory;
-        return TerminalPane.create(config, metrics, this::markContentChanged, widthPx, heightPx, workingDirectory);
+        // A new tiled pane joins the row, so each gets 1/(n+1) of the width.
+        return new double[] {lastWidth / (tiled.size() + 1), availHeight};
+    }
+
+    // Open a new pane in the active pane's working directory, so a split/new pane lands where the
+    // user currently is. With no active pane yet (the tab's first pane), fall back to the directory
+    // this tab was opened in. null (cwd unknown) falls back to home downstream.
+    private String paneWorkingDirectory() {
+        return active != null ? active.currentWorkingDirectory() : initialWorkingDirectory;
+    }
+
+    // Wire the pane's self-exit (process ended) back to the compositor so it gets reaped.
+    private TerminalPane register(TerminalPane pane) {
+        pane.setOnExit(() -> onPaneExit.accept(pane));
+        return pane;
     }
 
     private static boolean directionFilter(Direction direction, TerminalPane current, TerminalPane candidate) {

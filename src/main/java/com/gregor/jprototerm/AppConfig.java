@@ -5,6 +5,7 @@ import io.github.wasabithumb.jtoml.document.TomlDocument;
 import io.github.wasabithumb.jtoml.except.TomlException;
 import io.github.wasabithumb.jtoml.key.TomlKey;
 import io.github.wasabithumb.jtoml.value.TomlValue;
+import io.github.wasabithumb.jtoml.value.array.TomlArray;
 import io.github.wasabithumb.jtoml.value.primitive.TomlPrimitive;
 import io.github.wasabithumb.jtoml.value.table.TomlTable;
 
@@ -12,6 +13,7 @@ import java.nio.file.Files;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,7 +22,7 @@ public record AppConfig(
         int columns,
         int rows,
         long maxScrollback,
-        String shell,
+        List<String> shell,
         String fontFamily,
         double fontSize,
         double windowWidth,
@@ -62,7 +64,7 @@ public record AppConfig(
                     intValue(document, "terminal.columns", defaults.columns),
                     intValue(document, "terminal.rows", defaults.rows),
                     longValue(document, "terminal.max_scrollback", defaults.maxScrollback),
-                    stringValue(document, "terminal.shell", defaults.shell),
+                    stringListValue(document, "terminal.shell", defaults.shell),
                     stringValue(document, "terminal.font_family", defaults.fontFamily),
                     doubleValue(document, "terminal.font_size", defaults.fontSize),
                     doubleValue(document, "window.width", defaults.windowWidth),
@@ -140,8 +142,10 @@ public record AppConfig(
         return Path.of(System.getProperty("user.home"), ".config", "jprototerm", "config.toml");
     }
 
-    private static String defaultShell() {
-        return "/bin/bash";
+    private static List<String> defaultShell() {
+        // The executable plus its arguments, spawned verbatim. -i makes bash interactive; a
+        // different shell can use whatever flags it needs (or none) by editing this list.
+        return List.of("/bin/bash", "-i");
     }
 
     private static String defaultScrollbackEditorCommand() {
@@ -188,7 +192,7 @@ public record AppConfig(
         builder.append("columns = ").append(columns).append('\n');
         builder.append("rows = ").append(rows).append('\n');
         builder.append("max_scrollback = ").append(maxScrollback).append('\n');
-        builder.append("shell = ").append(quoted(shell)).append('\n');
+        builder.append("shell = ").append(quotedList(shell)).append('\n');
         builder.append("font_family = ").append(quoted(fontFamily)).append('\n');
         builder.append("font_size = ").append(trimDouble(fontSize)).append("\n\n");
         builder.append("[window]\n");
@@ -211,6 +215,17 @@ public record AppConfig(
             }
         }
         return builder.toString();
+    }
+
+    private static String quotedList(List<String> values) {
+        StringBuilder builder = new StringBuilder("[");
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) {
+                builder.append(", ");
+            }
+            builder.append(quoted(values.get(i)));
+        }
+        return builder.append("]").toString();
     }
 
     private static String quoted(String value) {
@@ -270,6 +285,26 @@ public record AppConfig(
     private static String stringValue(TomlTable table, String key, String fallback) {
         TomlPrimitive primitive = primitive(table, key);
         return primitive == null ? fallback : primitive.asString();
+    }
+
+    /** Reads a TOML array of strings (e.g. {@code shell = ["/bin/bash", "-i"]}), or the fallback. */
+    private static List<String> stringListValue(TomlTable table, String key, List<String> fallback) {
+        TomlValue value = table.get(key);
+        if (value == null || !value.isArray()) {
+            return fallback;
+        }
+        List<String> result = new ArrayList<>();
+        for (TomlValue element : value.asArray()) {
+            if (element.isPrimitive()) {
+                try {
+                    result.add(element.asPrimitive().asString());
+                } catch (RuntimeException ignored) {
+                    // Skip non-string entries; a shell command line is a list of strings.
+                }
+            }
+        }
+        // An empty or all-invalid array would mean "no program to run"; keep the default instead.
+        return result.isEmpty() ? fallback : List.copyOf(result);
     }
 
     private static int intValue(TomlTable table, String key, int fallback) {

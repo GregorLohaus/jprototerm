@@ -12,6 +12,7 @@ import dev.jlibghostty.RenderStateSnapshot;
 import dev.jlibghostty.ScrollViewport;
 import dev.jlibghostty.Terminal;
 import dev.jlibghostty.TerminalOptions;
+import javafx.application.Platform;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.shape.Shape;
 
@@ -39,6 +40,10 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
     private final RenderState renderState = new RenderState();
     private RenderStateSnapshot cachedSnapshot;
     private ShellSession session;
+    // Run once (on the FX thread) when this pane's process exits on its own, so the owning tab can
+    // remove it. Set by the Tab that creates the pane; null until then.
+    private Runnable onExit;
+    private boolean exited;
     // Clip region for rendering (rect minus the panes covering this one), set at layout time;
     // null means clip to the plain bounds. See RenderTarget#clip().
     private Shape clip;
@@ -74,6 +79,27 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
      */
     public static TerminalPane create(AppConfig config, TerminalMetrics metrics, Runnable onContentChange,
             double widthPx, double heightPx, String workingDirectory) {
+        TerminalPane pane = newPane(config, metrics, onContentChange, widthPx, heightPx);
+        pane.attach(ShellSession.start(config.shell(), config.envOverride(), pane, pane.columns, pane.rows,
+                workingDirectory));
+        return pane;
+    }
+
+    /**
+     * Opens a pane whose process runs {@code command} directly (via {@code /bin/sh -c}) instead of
+     * an interactive shell. The pane auto-closes when the command exits. See
+     * {@link ShellSession#startCommand}.
+     */
+    public static TerminalPane createWithCommand(AppConfig config, TerminalMetrics metrics, Runnable onContentChange,
+            double widthPx, double heightPx, String workingDirectory, String command) {
+        TerminalPane pane = newPane(config, metrics, onContentChange, widthPx, heightPx);
+        pane.attach(ShellSession.startCommand(config.envOverride(), pane, pane.columns, pane.rows,
+                workingDirectory, command));
+        return pane;
+    }
+
+    private static TerminalPane newPane(AppConfig config, TerminalMetrics metrics, Runnable onContentChange,
+            double widthPx, double heightPx) {
         int columns = widthPx > 0 ? metrics.columnsFor(widthPx) : config.columns();
         int rows = heightPx > 0 ? metrics.rowsFor(heightPx) : config.rows();
         Terminal terminal = Ghostty.open(new TerminalOptions(columns, rows, config.maxScrollback()));
@@ -81,8 +107,29 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
         TerminalPane pane = new TerminalPane(terminal, metrics, config.kittyGraphics(), onContentChange,
                 new GhosttyTerminalRenderer(metrics), columns, rows);
         pane.refresh();
-        pane.attach(ShellSession.start(config.shell(), config.envOverride(), pane, columns, rows, workingDirectory));
         return pane;
+    }
+
+    /** Sets the callback run when this pane's process exits on its own (see {@link #handleSessionExit}). */
+    public void setOnExit(Runnable onExit) {
+        this.onExit = onExit;
+    }
+
+    /**
+     * Called from the shell reader thread when the pty stream ends without us closing it (the
+     * process exited). Hops to the FX thread and fires {@link #onExit} once, so tab/compositor
+     * mutation happens on the thread that owns the layout.
+     */
+    void handleSessionExit() {
+        Platform.runLater(() -> {
+            if (exited) {
+                return;
+            }
+            exited = true;
+            if (onExit != null) {
+                onExit.run();
+            }
+        });
     }
 
     private void attach(ShellSession session) {

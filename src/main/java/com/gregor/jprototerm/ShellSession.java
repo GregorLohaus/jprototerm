@@ -2,6 +2,7 @@ package com.gregor.jprototerm;
 
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -20,26 +21,54 @@ public final class ShellSession implements AutoCloseable {
         });
     }
 
-    public static ShellSession start(String shell, Map<String, String> envOverride, TerminalPane pane,
+    /**
+     * Starts the configured shell. {@code shellCommand} is the executable plus its arguments (e.g.
+     * {@code ["/bin/bash", "-i"]}), spawned verbatim — any interactive flag is the user's choice in
+     * config, not assumed here.
+     */
+    public static ShellSession start(List<String> shellCommand, Map<String, String> envOverride, TerminalPane pane,
             int columns, int rows, String workingDirectory) {
         try {
-            Map<String, String> environment = new HashMap<>(System.getenv());
-            environment.put("TERM", "xterm-kitty");
-            environment.put("COLORTERM", "truecolor");
-            sanitizeWrapperEnvironment(environment);
-            environment.putAll(envOverride);
-
-            LinuxPty pty = LinuxPty.spawn(
-                    new String[] {shell, "-i"},
-                    environment,
-                    workingDirectory != null ? workingDirectory : System.getProperty("user.home"));
-            ShellSession session = new ShellSession(pty);
-            session.resize(columns, rows);
-            return session;
+            return spawn(shellCommand.toArray(new String[0]), envOverride, columns, rows, workingDirectory);
         } catch (RuntimeException ex) {
             pane.write("failed to start shell: " + ex.getMessage() + "\r\n");
-            throw new IllegalStateException("Could not start shell " + shell, ex);
+            throw new IllegalStateException("Could not start shell " + String.join(" ", shellCommand), ex);
         }
+    }
+
+    /**
+     * Starts a session whose first and only process is {@code /bin/sh -c command}, so the program
+     * runs deterministically from the start rather than being typed into an interactive shell —
+     * there is no startup/rc race to lose or mangle the input. When the process exits the pty
+     * closes and the pane auto-closes. {@code /bin/sh -c} is used (not the user's configured shell)
+     * because it is the portable way to run a command line and does not depend on shell-specific
+     * flags. {@code command} must not be null.
+     */
+    public static ShellSession startCommand(Map<String, String> envOverride, TerminalPane pane,
+            int columns, int rows, String workingDirectory, String command) {
+        try {
+            return spawn(new String[] {"/bin/sh", "-c", command}, envOverride, columns, rows, workingDirectory);
+        } catch (RuntimeException ex) {
+            pane.write("failed to run command: " + ex.getMessage() + "\r\n");
+            throw new IllegalStateException("Could not run command: " + command, ex);
+        }
+    }
+
+    private static ShellSession spawn(String[] argv, Map<String, String> envOverride,
+            int columns, int rows, String workingDirectory) {
+        Map<String, String> environment = new HashMap<>(System.getenv());
+        environment.put("TERM", "xterm-kitty");
+        environment.put("COLORTERM", "truecolor");
+        sanitizeWrapperEnvironment(environment);
+        environment.putAll(envOverride);
+
+        LinuxPty pty = LinuxPty.spawn(
+                argv,
+                environment,
+                workingDirectory != null ? workingDirectory : System.getProperty("user.home"));
+        ShellSession session = new ShellSession(pty);
+        session.resize(columns, rows);
+        return session;
     }
 
     /**
@@ -118,6 +147,11 @@ public final class ShellSession implements AutoCloseable {
             if (!closed) {
                 pane.write("\r\nshell output stopped: " + ex.getMessage() + "\r\n");
             }
+        }
+        // The stream ended without us closing the session, so the process exited on its own (the
+        // user typed `exit`, or a one-shot command pane finished). Let the pane tear itself down.
+        if (!closed) {
+            pane.handleSessionExit();
         }
     }
 

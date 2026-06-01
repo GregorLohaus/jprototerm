@@ -61,11 +61,13 @@ public final class Compositor {
     private long lastContentVersion = Long.MIN_VALUE;
     private boolean mouseButtonPressed;
     private MouseButton pressedButton = MouseButton.UNKNOWN;
+    // Run when the last pane closes (so the window can quit). No-op until Main sets it.
+    private Runnable onEmpty = () -> {};
 
     public Compositor(AppConfig config, TerminalMetrics metrics) {
         this.config = config;
         this.metrics = metrics;
-        tabs.add(new Tab(config, metrics));
+        tabs.add(new Tab(config, metrics, this::closePane));
         canvas.setFocusTraversable(true);
         canvas.setOnMousePressed(this::handleMousePressed);
         canvas.setOnMouseReleased(this::handleMouseReleased);
@@ -76,6 +78,11 @@ public final class Compositor {
 
     public Canvas canvas() {
         return canvas;
+    }
+
+    /** Sets the callback run when the last pane closes (e.g. to quit the application). */
+    public void setOnEmpty(Runnable onEmpty) {
+        this.onEmpty = onEmpty;
     }
 
     /** The kitty-image overlay, to be stacked directly above {@link #canvas()} in the window. */
@@ -131,6 +138,19 @@ public final class Compositor {
         return pane;
     }
 
+    /**
+     * Opens a floating pane running {@code command} directly (auto-closing when it exits), makes it
+     * active, and returns it (null when no tab exists).
+     */
+    public TerminalPane openFloatingPane(String command) {
+        if (isEmpty()) {
+            return null;
+        }
+        TerminalPane pane = currentTab().createFloatingPane(command);
+        layoutVersion++;
+        return pane;
+    }
+
     public void nextFloatingPane() {
         if (isEmpty()) {
             return;
@@ -151,23 +171,46 @@ public final class Compositor {
         if (isEmpty()) {
             return;
         }
-        currentTab().closeActivePane();
-        if (currentTab().isEmpty()) {
-            // Closing a tab's last pane closes the tab. When no tabs remain the surface is
-            // empty and Main quits.
-            tabs.remove(currentTabIndex);
-            if (currentTabIndex >= tabs.size()) {
-                currentTabIndex = Math.max(0, tabs.size() - 1);
+        TerminalPane active = currentTab().activePane();
+        if (active != null) {
+            closePane(active);
+        }
+    }
+
+    /**
+     * Closes a specific pane, wherever it lives. Driven both by the key-bound close (via
+     * {@link #closeActivePane()}) and by a pane whose process exited on its own. Drops the owning
+     * tab if it becomes empty, and fires {@link #setOnEmpty} when the last pane is gone. Must run on
+     * the FX thread.
+     */
+    public void closePane(TerminalPane pane) {
+        for (int i = 0; i < tabs.size(); i++) {
+            Tab tab = tabs.get(i);
+            if (tab.closePane(pane)) {
+                if (tab.isEmpty()) {
+                    // Closing a tab's last pane closes the tab. Keep currentTabIndex pointing at the
+                    // same tab (or clamp it when the current/last tab went away).
+                    tabs.remove(i);
+                    if (i < currentTabIndex) {
+                        currentTabIndex--;
+                    } else if (currentTabIndex >= tabs.size()) {
+                        currentTabIndex = Math.max(0, tabs.size() - 1);
+                    }
+                }
+                layoutVersion++;
+                if (isEmpty()) {
+                    onEmpty.run();
+                }
+                return;
             }
         }
-        layoutVersion++;
     }
 
     public void newTab() {
         // Open the new tab in the currently active pane's working directory, so it lands where the
         // user currently is rather than always in home.
         String workingDirectory = isEmpty() ? null : currentTab().activePane().currentWorkingDirectory();
-        tabs.add(new Tab(config, metrics, workingDirectory));
+        tabs.add(new Tab(config, metrics, workingDirectory, this::closePane));
         currentTabIndex = tabs.size() - 1;
         layoutVersion++;
     }

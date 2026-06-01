@@ -35,6 +35,12 @@ public final class Main extends Application {
 
         metrics = new TerminalMetrics(config.fontFamily(), config.fontSize());
         compositor = new Compositor(config, metrics);
+        // When the last pane closes — whether via the close-pane key or because a pane's process
+        // exited on its own — tear down and quit.
+        compositor.setOnEmpty(() -> {
+            compositor.close();
+            Platform.exit();
+        });
 
         StackPane root = new StackPane(compositor.canvas(), compositor.imageOverlay());
         compositor.canvas().widthProperty().bind(root.widthProperty());
@@ -113,13 +119,9 @@ public final class Main extends Application {
             compositor.promoteActiveFloating();
             event.consume();
         } else if (config.keybindings().get("close_pane").matches(event)) {
+            // Closing the last pane quits the app, via the compositor's onEmpty hook.
             compositor.closeActivePane();
             event.consume();
-            if (compositor.isEmpty()) {
-                // Closing the last pane quits the app.
-                compositor.close();
-                Platform.exit();
-            }
         } else if (config.keybindings().get("new_tab").matches(event)) {
             compositor.newTab();
             event.consume();
@@ -217,10 +219,10 @@ public final class Main extends Application {
             Files.writeString(file, compositor.activePane().scrollbackText());
             file.toFile().deleteOnExit();
 
-            TerminalPane pane = compositor.openFloatingPane();
-            if (pane != null) {
-                pane.send(scrollbackEditorCommand(file) + "\r");
-            }
+            // Run the editor as the floating pane's process (via /bin/sh -c) rather than typing the
+            // command into an interactive shell. The command runs deterministically from the start
+            // — no shell startup/rc race — and the pane auto-closes when the editor exits.
+            compositor.openFloatingPane(scrollbackEditorCommand(file));
         } catch (IOException ex) {
             System.err.println("Could not open scrollback in editor: " + ex.getMessage());
         }

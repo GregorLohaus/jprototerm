@@ -115,6 +115,19 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
         }
     }
 
+    /**
+     * Paste text to the shell: ghostty sanitises it (stripping anything that could smuggle in
+     * control sequences) and wraps it in the bracketed-paste markers, then it goes to the pty
+     * like typed input. We always request bracketed mode — every modern shell and editor enables
+     * DECSET 2004, and the jlibghostty API does not expose querying the terminal's live mode.
+     */
+    public void paste(String text) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        send(Ghostty.encodePaste(text, true));
+    }
+
     public boolean sendMouse(MouseInput input, MouseEncoderSize size, boolean anyButtonPressed) {
         synchronized (terminal) {
             mouseEncoder.syncFromTerminal(terminal);

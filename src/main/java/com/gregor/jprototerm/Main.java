@@ -11,6 +11,7 @@ import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
+import javafx.scene.input.Clipboard;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.StackPane;
@@ -131,6 +132,9 @@ public final class Main extends Application {
         } else if (config.keybindings().get("open_scrollback").matches(event)) {
             openScrollbackInEditor();
             event.consume();
+        } else if (config.keybindings().get("paste").matches(event)) {
+            pasteFromClipboard();
+            event.consume();
         } else {
             String encoded = KeyEncoder.encode(event);
             if (encoded != null) {
@@ -149,6 +153,13 @@ public final class Main extends Application {
         if (text != null && !text.isEmpty() && text.charAt(0) >= 0x20 && text.charAt(0) != 0x7f) {
             compositor.activePane().send(text);
             event.consume();
+        }
+    }
+
+    private void pasteFromClipboard() {
+        Clipboard clipboard = Clipboard.getSystemClipboard();
+        if (clipboard.hasString()) {
+            compositor.activePane().paste(clipboard.getString());
         }
     }
 

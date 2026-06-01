@@ -43,7 +43,8 @@ public record AppConfig(
             "previous_tab",
             "next_tab",
             "open_font_selector",
-            "open_scrollback"
+            "open_scrollback",
+            "paste"
     );
 
     public static AppConfig load() {
@@ -102,7 +103,8 @@ public record AppConfig(
                         Map.entry("previous_tab", KeyBinding.parse("ALT+SHIFT+H")),
                         Map.entry("next_tab", KeyBinding.parse("ALT+SHIFT+L")),
                         Map.entry("open_font_selector", KeyBinding.parse("ALT+T")),
-                        Map.entry("open_scrollback", KeyBinding.parse("ALT+S"))
+                        Map.entry("open_scrollback", KeyBinding.parse("ALT+S")),
+                        Map.entry("paste", KeyBinding.parse("CTRL+SHIFT+V"))
                 )
         );
     }

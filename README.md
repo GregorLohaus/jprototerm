@@ -12,6 +12,8 @@ floating panes and tabs.
 > setups, or Mesa/AMD/Intel GPUs. I'm happy to accept pull requests that broaden host
 > support.
 
+https://gitea.gregorlohaus.com/gregor/jprototerm/media/branch/main/demo.mp4
+
 ## Build
 
 ```sh

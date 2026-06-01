@@ -24,10 +24,6 @@ import java.nio.file.Path;
 import java.util.List;
 
 public final class Main extends Application {
-    // Mouse pointer location captured in main() before JavaFX loads GTK; used to pick the
-    // startup monitor. Reading it later (after GTK) makes AWT's X11 init clash with GDK.
-    private static java.awt.Point startupPointer;
-
     private Compositor compositor;
     private TerminalMetrics metrics;
     private AppConfig config;
@@ -75,10 +71,10 @@ public final class Main extends Application {
     }
 
     private static Screen activeScreen() {
-        java.awt.Point at = startupPointer;
+        int[] at = X11Pointer.query();
         if (at != null) {
-            // AWT and JavaFX share a coordinate space on the X11 virtual screen.
-            List<Screen> screens = Screen.getScreensForRectangle(at.x, at.y, 1.0, 1.0);
+            // libX11 and JavaFX share a coordinate space on the X11 virtual screen.
+            List<Screen> screens = Screen.getScreensForRectangle(at[0], at[1], 1.0, 1.0);
             if (!screens.isEmpty()) {
                 return screens.get(0);
             }
@@ -230,19 +226,6 @@ public final class Main extends Application {
 
     public static void main(String[] args) {
         System.setProperty("prism.order", System.getProperty("prism.order", "es2,sw"));
-        // Initialise AWT and read the pointer here, before launch() loads GTK. Done afterwards,
-        // AWT's X11 init calls XSetErrorHandler while GDK has an error trap pushed and warns.
-        startupPointer = readPointerLocation();
         launch(Main.class, args);
-    }
-
-    private static java.awt.Point readPointerLocation() {
-        try {
-            java.awt.PointerInfo pointer = java.awt.MouseInfo.getPointerInfo();
-            return pointer != null ? pointer.getLocation() : null;
-        } catch (Throwable ignored) {
-            // Headless or AWT unavailable — the startup monitor falls back to the primary screen.
-            return null;
-        }
     }
 }

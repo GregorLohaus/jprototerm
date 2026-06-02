@@ -817,18 +817,20 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             int blue = rgb & 0xff;
             // Clamp the glyph rectangle to the buffer once, so the inner loops carry no
             // per-pixel bounds check (this is the hottest pixel loop on a text repaint).
+            int glyphWidth = glyph.width();
+            byte[] glyphAlpha = glyph.alpha();
             int gyStart = Math.max(0, -y);
-            int gyEnd = Math.min(glyph.height, height - y);
+            int gyEnd = Math.min(glyph.height(), height - y);
             int gxStart = Math.max(0, -x);
-            int gxEnd = Math.min(glyph.width, width - x);
+            int gxEnd = Math.min(glyphWidth, width - x);
             if (gyStart >= gyEnd || gxStart >= gxEnd) {
                 return;
             }
             for (int gy = gyStart; gy < gyEnd; gy++) {
                 int rowOffset = (y + gy) * width;
-                int glyphOffset = gy * glyph.width;
+                int glyphOffset = gy * glyphWidth;
                 for (int gx = gxStart; gx < gxEnd; gx++) {
-                    int alpha = glyph.alpha[glyphOffset + gx] & 0xff;
+                    int alpha = glyphAlpha[glyphOffset + gx] & 0xff;
                     if (alpha == 0) {
                         continue;
                     }

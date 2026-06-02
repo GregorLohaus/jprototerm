@@ -236,6 +236,18 @@ public final class Compositor {
         tabs.clear();
     }
 
+    /**
+     * Signals and reaps every pane's shell process across all tabs, without tearing down render
+     * state. Intended for a JVM shutdown hook (SIGTERM/SIGINT/SIGHUP), so child shells get the
+     * configured close signal instead of being orphaned when jprototerm itself is killed. Safe to
+     * call off the FX thread and idempotent; see {@link TerminalPane#terminateSession()}.
+     */
+    public void terminateSessions() {
+        for (Tab tab : List.copyOf(tabs)) {
+            tab.terminateSessions();
+        }
+    }
+
     private Tab currentTab() {
         return tabs.get(currentTabIndex);
     }

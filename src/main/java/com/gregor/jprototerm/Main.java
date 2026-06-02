@@ -41,6 +41,12 @@ public final class Main extends Application {
             compositor.close();
             Platform.exit();
         });
+        // If jprototerm itself is killed (SIGTERM/SIGINT/SIGHUP, e.g. a logout or `kill`), the JVM
+        // runs shutdown hooks before exiting. Send each pane's configured close signal here so the
+        // child shells are terminated rather than orphaned. Only the ptys are touched (not ghostty's
+        // native state), so this is safe to run concurrently with the still-live render loop. A
+        // SIGKILL of jprototerm bypasses hooks entirely; nothing can help there.
+        Runtime.getRuntime().addShutdownHook(new Thread(compositor::terminateSessions, "shell-cleanup"));
 
         StackPane root = new StackPane(compositor.canvas(), compositor.imageOverlay());
         compositor.canvas().widthProperty().bind(root.widthProperty());

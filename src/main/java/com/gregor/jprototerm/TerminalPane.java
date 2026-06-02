@@ -39,7 +39,7 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
     // tracking meaningful: update() accumulates dirty since the last resetDirty().
     private final RenderState renderState = new RenderState();
     private RenderStateSnapshot cachedSnapshot;
-    private ShellSession session;
+    private volatile ShellSession session;
     // Run once (on the FX thread) when this pane's process exits on its own, so the owning tab can
     // remove it. Set by the Tab that creates the pane; null until then.
     private Runnable onExit;
@@ -379,5 +379,18 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
         mouseEncoder.close();
         renderState.close();
         terminal.close();
+    }
+
+    /**
+     * Signals and reaps just the shell process, leaving the render/native state untouched. Unlike
+     * {@link #close()} this is safe to call off the FX thread — notably from a JVM shutdown hook,
+     * which runs concurrently with the live render loop — because it only touches the pty (a child
+     * process and fd), not ghostty's terminal handles. Idempotent; the OS reclaims the rest on exit.
+     */
+    public void terminateSession() {
+        ShellSession current = session;
+        if (current != null) {
+            current.close();
+        }
     }
 }

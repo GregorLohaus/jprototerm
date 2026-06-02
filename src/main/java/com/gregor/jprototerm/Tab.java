@@ -423,4 +423,14 @@ final class Tab implements AutoCloseable {
         tiled.clear();
         floating.clear();
     }
+
+    /**
+     * Signals and reaps every pane's shell process without tearing down render state. Safe to call
+     * off the FX thread (see {@link TerminalPane#terminateSession()}); iterates snapshots so a
+     * concurrent close on the FX thread can't trigger a {@link java.util.ConcurrentModificationException}.
+     */
+    public void terminateSessions() {
+        List.copyOf(tiled).forEach(TerminalPane::terminateSession);
+        List.copyOf(floating).forEach(TerminalPane::terminateSession);
+    }
 }

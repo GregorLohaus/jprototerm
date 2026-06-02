@@ -96,6 +96,10 @@ public final class ShellSession implements AutoCloseable {
         // These are jprototerm's own runtime settings, not the user's shell environment.
         environment.remove("GDK_BACKEND");
         environment.remove("JLIBGHOSTTY_LIBRARY");
+        // The wrapper exports this to point our own JVM at its CDS archive; left in place it
+        // would make unrelated java/gradle invocations inside the terminal load jprototerm's
+        // archive (and print the "Picked up JAVA_TOOL_OPTIONS" banner).
+        environment.remove("JAVA_TOOL_OPTIONS");
     }
 
     public void startReading(TerminalPane pane) {

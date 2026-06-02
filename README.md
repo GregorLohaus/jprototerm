@@ -62,6 +62,46 @@ gradle run
 
 The Gradle project is the source of truth for the JavaFX build.
 
+## Daemon (optional, faster launches)
+
+Cold start pays for JVM + JavaFX + GL/X11 init every time. The optional daemon keeps one JVM
+(one toolkit) running and hosts every window in it, so a `jprototerm` launch just asks the
+daemon to open a window — it appears without paying that startup cost again.
+
+Run it once in the background:
+
+```sh
+jprototerm --daemon &
+```
+
+After that, a bare `jprototerm` connects to the daemon and opens a window in the current
+directory. If no daemon is running, `jprototerm` falls back to a standalone in-process window
+(today's behavior), so it always works.
+
+To start the daemon automatically with your graphical session, enable the bundled **user**
+service (it's a user service, not a system one, because X11 needs a display — which only
+exists after you log in):
+
+```sh
+mkdir -p ~/.config/systemd/user
+ln -sf "$(dirname "$(readlink -f "$(command -v jprototerm)")")/../share/systemd/user/jprototerm.service" \
+  ~/.config/systemd/user/jprototerm.service
+systemctl --user enable --now jprototerm.service
+```
+
+If the daemon can't reach your display (e.g. `systemctl --user status jprototerm` shows it
+failing to open a window), import the session variables once and restart it:
+
+```sh
+systemctl --user import-environment DISPLAY XAUTHORITY
+systemctl --user restart jprototerm.service
+```
+
+Closing a window (the WM close button, or the close-pane key on the last pane) tears that
+window down — its shell processes are signalled with the configured `close_signal` — without
+affecting other windows or the daemon. Stop the daemon (and all its windows) with
+`systemctl --user stop jprototerm.service`, or `pkill -f 'jprototerm --daemon'`.
+
 ## Config
 
 Configuration is read from:

@@ -65,9 +65,18 @@ public final class Compositor {
     private Runnable onEmpty = () -> {};
 
     public Compositor(AppConfig config, TerminalMetrics metrics) {
+        this(config, metrics, null);
+    }
+
+    /**
+     * Creates a compositor whose first tab's first pane starts in {@code workingDirectory} (e.g. the
+     * cwd a client passed when asking the daemon to open this window), or the user's home when
+     * {@code null}.
+     */
+    public Compositor(AppConfig config, TerminalMetrics metrics, String workingDirectory) {
         this.config = config;
         this.metrics = metrics;
-        tabs.add(new Tab(config, metrics, this::closePane));
+        tabs.add(new Tab(config, metrics, workingDirectory, this::closePane));
         canvas.setFocusTraversable(true);
         canvas.setOnMousePressed(this::handleMousePressed);
         canvas.setOnMouseReleased(this::handleMouseReleased);

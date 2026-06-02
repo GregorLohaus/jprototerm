@@ -120,6 +120,25 @@
                 --set JLIBGHOSTTY_LIBRARY "${ghosttyVt}/lib/libghostty-vt.so" \
                 --set GDK_BACKEND x11
 
+              # Optional background daemon: one JVM hosts every window, so client launches skip
+              # cold JVM/JavaFX/GL startup. A *user* service tied to graphical-session.target (X11
+              # needs a display, which only exists after login). Enable instructions are in README.
+              mkdir -p "$out/share/systemd/user"
+              cat > "$out/share/systemd/user/jprototerm.service" <<EOF
+              [Unit]
+              Description=jprototerm terminal daemon
+              PartOf=graphical-session.target
+              After=graphical-session.target
+
+              [Service]
+              Type=simple
+              ExecStart=$out/bin/jprototerm --daemon
+              Restart=on-failure
+
+              [Install]
+              WantedBy=graphical-session.target
+              EOF
+
               runHook postInstall
             '';
           });

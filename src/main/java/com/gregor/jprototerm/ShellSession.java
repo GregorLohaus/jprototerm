@@ -96,10 +96,26 @@ public final class ShellSession implements AutoCloseable {
         // These are jprototerm's own runtime settings, not the user's shell environment.
         environment.remove("GDK_BACKEND");
         environment.remove("JLIBGHOSTTY_LIBRARY");
-        // The wrapper exports this to point our own JVM at its CDS archive; left in place it
-        // would make unrelated java/gradle invocations inside the terminal load jprototerm's
-        // archive (and print the "Picked up JAVA_TOOL_OPTIONS" banner).
-        environment.remove("JAVA_TOOL_OPTIONS");
+        sanitizeJavaToolOptions(environment);
+    }
+
+    private static void sanitizeJavaToolOptions(Map<String, String> environment) {
+        String javaToolOptions = environment.get("JAVA_TOOL_OPTIONS");
+        if (javaToolOptions == null
+                || !javaToolOptions.contains("-XX:SharedArchiveFile=")
+                || !javaToolOptions.contains("/jprototerm/app")) {
+            return;
+        }
+
+        String sanitized = javaToolOptions
+                .replaceAll("(^|\\s)-XX:\\+AutoCreateSharedArchive(?=\\s|$)", " ")
+                .replaceAll("(^|\\s)-XX:SharedArchiveFile=\\S*/jprototerm/app\\S*(?=\\s|$)", " ")
+                .trim();
+        if (sanitized.isEmpty()) {
+            environment.remove("JAVA_TOOL_OPTIONS");
+        } else {
+            environment.put("JAVA_TOOL_OPTIONS", sanitized);
+        }
     }
 
     public void startReading(TerminalPane pane) {

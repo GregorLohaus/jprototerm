@@ -107,9 +107,25 @@
                 classpath="$classpath''${classpath:+:}$jar"
               done
 
+              # The CDS archive records launch-time module/classpath properties, including
+              # Nix store paths. Key it by this build's launch shape so stale archives from a
+              # previous package path cannot be reused, and pass the flags on java's command
+              # line so terminal child processes do not inherit them through JAVA_TOOL_OPTIONS.
+              cdsArchive="app-$(printf '%s\n' \
+                "${pkgs.jdk25}" \
+                "$out" \
+                "$classpath" \
+                "$out/share/jprototerm/javafx" \
+                "--enable-native-access=ALL-UNNAMED,javafx.graphics" \
+                "--add-modules=javafx.controls,javafx.fxml" \
+                "com.gregor.jprototerm.Main" \
+                | sha256sum | cut -c1-16).jsa"
+
               makeWrapper "${pkgs.jdk25}/bin/java" "$out/bin/jprototerm" \
                 --run 'export JPROTOTERM_HOST_LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:-}"' \
-                --run 'cdsDir="''${XDG_CACHE_HOME:-$HOME/.cache}/jprototerm"; mkdir -p "$cdsDir"; export JAVA_TOOL_OPTIONS="-XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=$cdsDir/app.jsa ''${JAVA_TOOL_OPTIONS:-}"' \
+                --run 'cdsDir="''${XDG_CACHE_HOME:-$HOME/.cache}/jprototerm"; mkdir -p "$cdsDir"' \
+                --add-flags "-XX:+AutoCreateSharedArchive" \
+                --add-flags "-XX:SharedArchiveFile=\$cdsDir/$cdsArchive" \
                 --add-flags "--enable-native-access=ALL-UNNAMED,javafx.graphics" \
                 --add-flags "--module-path $out/share/jprototerm/javafx" \
                 --add-flags "--add-modules javafx.controls,javafx.fxml" \

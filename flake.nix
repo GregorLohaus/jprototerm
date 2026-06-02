@@ -109,6 +109,7 @@
 
               makeWrapper "${pkgs.jdk25}/bin/java" "$out/bin/jprototerm" \
                 --run 'export JPROTOTERM_HOST_LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:-}"' \
+                --run 'cdsDir="''${XDG_CACHE_HOME:-$HOME/.cache}/jprototerm"; mkdir -p "$cdsDir"; export JAVA_TOOL_OPTIONS="-XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=$cdsDir/app.jsa ''${JAVA_TOOL_OPTIONS:-}"' \
                 --add-flags "--enable-native-access=ALL-UNNAMED,javafx.graphics" \
                 --add-flags "--module-path $out/share/jprototerm/javafx" \
                 --add-flags "--add-modules javafx.controls,javafx.fxml" \

@@ -27,9 +27,10 @@ public final class ShellSession implements AutoCloseable {
      * config, not assumed here.
      */
     public static ShellSession start(List<String> shellCommand, Map<String, String> envOverride, TerminalPane pane,
-            int columns, int rows, String workingDirectory) {
+            int columns, int rows, String workingDirectory, int closeSignal) {
         try {
-            return spawn(shellCommand.toArray(new String[0]), envOverride, columns, rows, workingDirectory);
+            return spawn(shellCommand.toArray(new String[0]), envOverride, columns, rows, workingDirectory,
+                    closeSignal);
         } catch (RuntimeException ex) {
             pane.write("failed to start shell: " + ex.getMessage() + "\r\n");
             throw new IllegalStateException("Could not start shell " + String.join(" ", shellCommand), ex);
@@ -45,9 +46,10 @@ public final class ShellSession implements AutoCloseable {
      * flags. {@code command} must not be null.
      */
     public static ShellSession startCommand(Map<String, String> envOverride, TerminalPane pane,
-            int columns, int rows, String workingDirectory, String command) {
+            int columns, int rows, String workingDirectory, String command, int closeSignal) {
         try {
-            return spawn(new String[] {"/bin/sh", "-c", command}, envOverride, columns, rows, workingDirectory);
+            return spawn(new String[] {"/bin/sh", "-c", command}, envOverride, columns, rows, workingDirectory,
+                    closeSignal);
         } catch (RuntimeException ex) {
             pane.write("failed to run command: " + ex.getMessage() + "\r\n");
             throw new IllegalStateException("Could not run command: " + command, ex);
@@ -55,7 +57,7 @@ public final class ShellSession implements AutoCloseable {
     }
 
     private static ShellSession spawn(String[] argv, Map<String, String> envOverride,
-            int columns, int rows, String workingDirectory) {
+            int columns, int rows, String workingDirectory, int closeSignal) {
         Map<String, String> environment = new HashMap<>(System.getenv());
         environment.put("TERM", "xterm-kitty");
         environment.put("COLORTERM", "truecolor");
@@ -65,7 +67,8 @@ public final class ShellSession implements AutoCloseable {
         LinuxPty pty = LinuxPty.spawn(
                 argv,
                 environment,
-                workingDirectory != null ? workingDirectory : System.getProperty("user.home"));
+                workingDirectory != null ? workingDirectory : System.getProperty("user.home"),
+                closeSignal);
         ShellSession session = new ShellSession(pty);
         session.resize(columns, rows);
         return session;

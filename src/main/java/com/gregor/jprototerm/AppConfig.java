@@ -29,6 +29,7 @@ public record AppConfig(
         double windowHeight,
         boolean kittyGraphics,
         String scrollbackEditorCommand,
+        String closeSignal,
         Map<String, String> envOverride,
         Map<String, KeyBinding> keybindings
 ) {
@@ -71,6 +72,7 @@ public record AppConfig(
                     doubleValue(document, "window.height", defaults.windowHeight),
                     booleanValue(document, "kitty_graphics.enabled", defaults.kittyGraphics),
                     stringValue(document, "scrollback.editor_command", defaults.scrollbackEditorCommand),
+                    closeSignalValue(document, defaults.closeSignal),
                     envOverride(document, defaults.envOverride),
                     keybindings(document, defaults)
             );
@@ -92,6 +94,7 @@ public record AppConfig(
                 760.0,
                 true,
                 defaultScrollbackEditorCommand(),
+                "SIGTERM",
                 Map.of(),
                 Map.ofEntries(
                         Map.entry("navigate_left", KeyBinding.parse("ALT+H")),
@@ -125,9 +128,20 @@ public record AppConfig(
                 windowHeight,
                 kittyGraphics,
                 scrollbackEditorCommand,
+                closeSignal,
                 envOverride,
                 keybindings
         );
+    }
+
+    /**
+     * The {@link #closeSignal} as a Linux signal number, sent to a pane's shell process when the
+     * pane is closed (e.g. via the close-pane key). Falls back to SIGTERM (15) if the configured
+     * name is somehow unresolvable.
+     */
+    public int closeSignalNumber() {
+        int number = LinuxPty.signalNumber(closeSignal);
+        return number < 0 ? 15 : number;
     }
 
     public void save() {
@@ -154,6 +168,23 @@ public record AppConfig(
             editor = "vi";
         }
         return editor.trim() + " {file}";
+    }
+
+    /**
+     * Reads {@code terminal.close_signal}, normalising it to a canonical {@code SIG*} name. An
+     * unknown or unset value keeps {@code fallback} so a typo can't leave a pane unkillable.
+     */
+    private static String closeSignalValue(TomlTable table, String fallback) {
+        String value = stringValue(table, "terminal.close_signal", null);
+        if (value == null) {
+            return fallback;
+        }
+        if (LinuxPty.signalNumber(value) < 0) {
+            System.err.println("Unknown terminal.close_signal '" + value + "', using " + fallback);
+            return fallback;
+        }
+        String normalized = value.trim().toUpperCase(java.util.Locale.ROOT);
+        return normalized.startsWith("SIG") ? normalized : "SIG" + normalized;
     }
 
     private static Map<String, KeyBinding> keybindings(TomlTable table, AppConfig defaults) {
@@ -193,6 +224,7 @@ public record AppConfig(
         builder.append("rows = ").append(rows).append('\n');
         builder.append("max_scrollback = ").append(maxScrollback).append('\n');
         builder.append("shell = ").append(quotedList(shell)).append('\n');
+        builder.append("close_signal = ").append(quoted(closeSignal)).append('\n');
         builder.append("font_family = ").append(quoted(fontFamily)).append('\n');
         builder.append("font_size = ").append(trimDouble(fontSize)).append("\n\n");
         builder.append("[window]\n");

@@ -3,6 +3,9 @@ columns = 100
 rows = 30
 max_scrollback = 100000
 shell = "/bin/bash"
+# Signal sent to a pane's shell process when the pane is closed (e.g. ALT+X).
+# Use SIGKILL to force-kill instead of asking the shell to terminate.
+close_signal = "SIGTERM"
 font_family = "JetBrainsMono Nerd Font"
 font_size = 15
 

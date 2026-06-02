@@ -63,7 +63,10 @@ public final class LinuxPty implements AutoCloseable {
     private static final long TIOCSWINSZ = 0x5414L;
     private static final short POSIX_SPAWN_SETSID = 0x80;
     private static final int SIGHUP = 1;
+    private static final int SIGINT = 2;
+    private static final int SIGQUIT = 3;
     private static final int SIGKILL = 9;
+    private static final int SIGTERM = 15;
     private static final int WNOHANG = 1;
 
     // struct winsize { unsigned short ws_row, ws_col, ws_xpixel, ws_ypixel; }
@@ -105,11 +108,36 @@ public final class LinuxPty implements AutoCloseable {
     private final Object writeLock = new Object();
     private final int masterFd;
     private final int pid;
+    private final int closeSignal;
     private volatile boolean closed;
 
-    private LinuxPty(int masterFd, int pid) {
+    private LinuxPty(int masterFd, int pid, int closeSignal) {
         this.masterFd = masterFd;
         this.pid = pid;
+        this.closeSignal = closeSignal;
+    }
+
+    /**
+     * Resolves a signal name (e.g. {@code "SIGTERM"}, {@code "TERM"}, {@code "SIGKILL"}) to its
+     * Linux signal number, or {@code -1} if the name is not one we recognise. Case-insensitive and
+     * tolerant of a missing {@code SIG} prefix.
+     */
+    public static int signalNumber(String name) {
+        if (name == null) {
+            return -1;
+        }
+        String normalized = name.trim().toUpperCase(java.util.Locale.ROOT);
+        if (normalized.startsWith("SIG")) {
+            normalized = normalized.substring(3);
+        }
+        return switch (normalized) {
+            case "HUP" -> SIGHUP;
+            case "INT" -> SIGINT;
+            case "QUIT" -> SIGQUIT;
+            case "KILL" -> SIGKILL;
+            case "TERM" -> SIGTERM;
+            default -> -1;
+        };
     }
 
     /**
@@ -118,8 +146,10 @@ public final class LinuxPty implements AutoCloseable {
      * @param argv command and arguments (e.g. {@code {"/bin/zsh", "-i"}})
      * @param environment environment for the child, as KEY=VALUE pairs
      * @param workingDirectory directory the child starts in, or {@code null} to inherit
+     * @param closeSignal signal number sent to the child on {@link #close()} (e.g. SIGTERM)
      */
-    public static LinuxPty spawn(String[] argv, Map<String, String> environment, String workingDirectory) {
+    public static LinuxPty spawn(String[] argv, Map<String, String> environment, String workingDirectory,
+            int closeSignal) {
         Arena setup = Arena.ofConfined();
         try {
             int master = check(callInt(POSIX_OPENPT, O_RDWR | O_NOCTTY), "posix_openpt");
@@ -158,7 +188,7 @@ public final class LinuxPty implements AutoCloseable {
                     if (rc != 0) {
                         throw new IllegalStateException("posix_spawnp failed for " + argv[0] + " (rc=" + rc + ")");
                     }
-                    return new LinuxPty(master, pidOut.get(C_INT, 0));
+                    return new LinuxPty(master, pidOut.get(C_INT, 0), closeSignal);
                 } finally {
                     callInt(ATTR_DESTROY, attr);
                     callInt(FA_DESTROY, actions);
@@ -249,7 +279,7 @@ public final class LinuxPty implements AutoCloseable {
             return;
         }
         closed = true;
-        callKill(pid, SIGHUP);
+        callKill(pid, closeSignal);
         callInt(CLOSE, masterFd);
         reap();
         arena.close();

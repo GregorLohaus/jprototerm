@@ -81,7 +81,7 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
             double widthPx, double heightPx, String workingDirectory) {
         TerminalPane pane = newPane(config, metrics, onContentChange, widthPx, heightPx);
         pane.attach(ShellSession.start(config.shell(), config.envOverride(), pane, pane.columns, pane.rows,
-                workingDirectory));
+                workingDirectory, config.closeSignalNumber()));
         return pane;
     }
 
@@ -94,7 +94,7 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
             double widthPx, double heightPx, String workingDirectory, String command) {
         TerminalPane pane = newPane(config, metrics, onContentChange, widthPx, heightPx);
         pane.attach(ShellSession.startCommand(config.envOverride(), pane, pane.columns, pane.rows,
-                workingDirectory, command));
+                workingDirectory, command, config.closeSignalNumber()));
         return pane;
     }
 

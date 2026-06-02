@@ -101,6 +101,19 @@ final class Tab implements AutoCloseable {
         return pane != null && pane == active;
     }
 
+    /** Every pane this tab owns, composited or not (tiled then floating). */
+    List<TerminalPane> allPanes() {
+        List<TerminalPane> all = new ArrayList<>(tiled.size() + floating.size());
+        all.addAll(tiled);
+        all.addAll(floating);
+        return all;
+    }
+
+    /** Whether this tab owns panes that {@link #panes()} does not currently composite. */
+    boolean hasHiddenPanes() {
+        return !floatingVisible && !floating.isEmpty();
+    }
+
     boolean focus(TerminalPane pane) {
         if (pane == active || !isFocusable(pane)) {
             return false;

@@ -33,6 +33,14 @@ abstract class TerminalRenderer {
         return java.util.List.of();
     }
 
+    /**
+     * Release any large, rebuildable render buffers (e.g. a pane's pixel backbuffer) because the
+     * target is no longer being composited. A no-op by default; the next paint must rebuild whatever
+     * was dropped. Called off the paint path, so it must not assume a frame is in progress.
+     */
+    void release() {
+    }
+
     protected static void clipRect(GraphicsContext gc, double x, double y, double width, double height) {
         gc.beginPath();
         gc.rect(x, y, width, height);

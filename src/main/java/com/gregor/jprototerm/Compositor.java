@@ -19,9 +19,11 @@ import javafx.scene.text.TextAlignment;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Owns the window's tabs and drives rendering and input. It composites only the current tab:
@@ -52,6 +54,16 @@ public final class Compositor {
     // Last content version drawn to the canvas per pane, so a content frame repaints only
     // the panes that actually changed.
     private final Map<TerminalPane, Long> paneContentVersion = new HashMap<>();
+    // Off-screen panes (background tabs, hidden floating groups) keep their full-resolution pixel
+    // backbuffer + GPU image until released. We free them after a short grace period rather than the
+    // instant they're hidden, so rapidly flipping through tabs never thrashes the realloc/upload.
+    private static final long RELEASE_DELAY_NANOS = 750_000_000L;
+    // Hidden pane -> nanoTime it became hidden (the release timer); removed once released or shown.
+    private final Map<TerminalPane, Long> hiddenSince = new HashMap<>();
+    // Panes whose backbuffer is currently released, so we don't release again every frame.
+    private final Set<TerminalPane> released = new HashSet<>();
+    // layoutVersion at the last sweep: lets an idle, all-released steady state skip the scan.
+    private long lastSweepLayoutVersion = Long.MIN_VALUE;
     // Cheap per-frame dirty signal: skip the whole render when none of these changed.
     private double lastWidth = -1.0;
     private double lastHeight = -1.0;
@@ -278,11 +290,54 @@ public final class Compositor {
     // ---- Rendering ------------------------------------------------------------------
 
     public void render() {
+        sweepHiddenPanes();
         switch (nextFrameType()) {
             case IDLE -> { }
             case LAYOUT -> renderLayoutFrame();
             case CONTENT -> renderContentFrame();
         }
+    }
+
+    // Free the backbuffer of any pane that has been off-screen past the grace period, and re-arm the
+    // timer for newly hidden panes. The next layout frame rebuilds a released pane (paintFull goes
+    // through ensure()), so showing a tab again is the only cost. Skips entirely once everything that
+    // can be hidden is already released and the layout hasn't changed, so an idle multi-tab window
+    // does no per-frame work here.
+    private void sweepHiddenPanes() {
+        if (layoutVersion == lastSweepLayoutVersion && hiddenSince.isEmpty()) {
+            return;
+        }
+        lastSweepLayoutVersion = layoutVersion;
+
+        // Fast path: a single tab compositing all of its panes has nothing off-screen.
+        if (tabs.size() <= 1 && (tabs.isEmpty() || !currentTab().hasHiddenPanes())) {
+            hiddenSince.clear();
+            released.clear();
+            return;
+        }
+
+        Set<TerminalPane> visible = new HashSet<>(currentPanes());
+        Set<TerminalPane> live = new HashSet<>();
+        long now = System.nanoTime();
+        for (Tab tab : tabs) {
+            for (TerminalPane pane : tab.allPanes()) {
+                live.add(pane);
+                if (visible.contains(pane)) {
+                    hiddenSince.remove(pane);
+                    released.remove(pane);
+                } else if (!released.contains(pane)) {
+                    Long since = hiddenSince.putIfAbsent(pane, now);
+                    if (since != null && now - since >= RELEASE_DELAY_NANOS) {
+                        pane.releaseRenderResources();
+                        released.add(pane);
+                        hiddenSince.remove(pane);
+                    }
+                }
+            }
+        }
+        // Forget panes that have since closed.
+        hiddenSince.keySet().retainAll(live);
+        released.retainAll(live);
     }
 
     // Classify this frame and commit the change trackers. A layout change (size, font,

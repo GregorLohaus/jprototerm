@@ -350,6 +350,16 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
         onContentChange.run();
     }
 
+    /**
+     * Drop this pane's large, rebuildable render buffers because it is no longer being composited
+     * (e.g. it sits in a background tab or a hidden floating group). The pixel backbuffer and its GPU
+     * image are freed; the shell, ghostty terminal and shared glyph atlas are untouched, and the next
+     * {@link #paintFull} rebuilds the buffer. Safe to call repeatedly. See {@link TerminalRenderer#release}.
+     */
+    public void releaseRenderResources() {
+        renderer.release();
+    }
+
     /** Paint the whole pane; see {@link TerminalRenderer#paintFull}. */
     public long paintFull(GraphicsContext gc, boolean active) {
         renderer.paintFull(gc, this, active);

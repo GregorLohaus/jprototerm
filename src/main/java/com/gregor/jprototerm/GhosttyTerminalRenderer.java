@@ -13,17 +13,12 @@ import dev.jlibghostty.RenderCursorStyle;
 import dev.jlibghostty.RenderRow;
 import dev.jlibghostty.RenderStateSnapshot;
 import javafx.geometry.Rectangle2D;
-import javafx.scene.SnapshotParameters;
-import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.PixelBuffer;
-import javafx.scene.image.PixelReader;
 import javafx.scene.image.WritableImage;
 import javafx.scene.paint.Color;
-import javafx.scene.text.FontSmoothingType;
-import javafx.scene.text.Text;
 
 import java.io.ByteArrayInputStream;
 import java.nio.IntBuffer;
@@ -118,6 +113,12 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     @Override
     List<KittyImageNode> kittyImages() {
         return kittyImageNodes;
+    }
+
+    @Override
+    void release() {
+        software.release();
+        kittyImageNodes = List.of();
     }
 
     // Effective background colour of a cell as it is drawn (reverse video swaps fg/bg, an
@@ -416,7 +417,6 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         private WritableImage image;
         private long[] rowHashes = new long[0];
         private CursorState lastCursor = CursorState.none();
-        private GlyphCache glyphs;
         // Half-open [min, max) vertical span of buffer rows written since the last present, so
         // present() can upload only that band to the GPU instead of the whole pane texture.
         private int dirtyMinY = Integer.MAX_VALUE;
@@ -583,7 +583,6 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             int nextWidth = Math.max(1, (int) Math.round(paneWidth));
             int nextHeight = Math.max(1, (int) Math.round(paneHeight));
             if (nextWidth == width && nextHeight == height && image != null) {
-                ensureGlyphs();
                 return;
             }
 
@@ -593,17 +592,19 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             pixelBuffer = new PixelBuffer<>(width, height, IntBuffer.wrap(pixels), PixelFormat.getIntArgbPreInstance());
             image = new WritableImage(pixelBuffer);
             invalidate();
-            ensureGlyphs();
         }
 
-        private void ensureGlyphs() {
-            int cellWidth = cellWidth();
-            int lineHeight = lineHeight();
-            double baseline = metrics.baselineOffset();
-            if (glyphs == null || glyphs.font != metrics.font()
-                    || glyphs.cellWidth != cellWidth || glyphs.lineHeight != lineHeight || glyphs.baseline != baseline) {
-                glyphs = new GlyphCache(metrics.font(), cellWidth, lineHeight, baseline);
-            }
+        // Drop the full-resolution pixel buffer and its GPU-backed image. The next ensure() rebuilds
+        // them (and a layout frame's paintFull repaints from scratch), so this is safe to call when
+        // the pane goes off-screen; only the shared glyph atlas (in TerminalMetrics) survives.
+        private void release() {
+            pixels = new int[0];
+            pixelBuffer = null;
+            image = null;
+            width = 0;
+            height = 0;
+            invalidate();
+            resetDirty();
         }
 
         private void present(GraphicsContext gc, double px, double py) {
@@ -804,13 +805,13 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                 if (cell.kittyPlaceholder().isPresent() || cell.codepoints().length == 0) {
                     continue;
                 }
-                Glyph glyph = glyphs.glyph(cell.text());
+                GlyphCache.Glyph glyph = metrics.glyphCache().glyph(cell.text());
                 int color = rgb(cellForegroundColor(cell));
                 blitGlyph(glyph, x0 + (cell.column() * cellWidth), rowTop, color);
             }
         }
 
-        private void blitGlyph(Glyph glyph, int x, int y, int rgb) {
+        private void blitGlyph(GlyphCache.Glyph glyph, int x, int y, int rgb) {
             int red = (rgb >> 16) & 0xff;
             int green = (rgb >> 8) & 0xff;
             int blue = rgb & 0xff;
@@ -945,53 +946,6 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         private int lineHeight() {
             return Math.max(1, (int) Math.round(metrics.lineHeight()));
         }
-    }
-
-    private final class GlyphCache {
-        private final javafx.scene.text.Font font;
-        private final int cellWidth;
-        private final int lineHeight;
-        private final double baseline;
-        private final Map<String, Glyph> glyphs = new HashMap<>();
-
-        private GlyphCache(javafx.scene.text.Font font, int cellWidth, int lineHeight, double baseline) {
-            this.font = font;
-            this.cellWidth = cellWidth;
-            this.lineHeight = lineHeight;
-            this.baseline = baseline;
-        }
-
-        private Glyph glyph(String text) {
-            return glyphs.computeIfAbsent(text, this::renderGlyph);
-        }
-
-        private Glyph renderGlyph(String value) {
-            Text measured = new Text(value);
-            measured.setFont(font);
-            int glyphWidth = Math.max(cellWidth, (int) Math.ceil(measured.getLayoutBounds().getWidth()) + 2);
-            Canvas canvas = new Canvas(glyphWidth, lineHeight);
-            GraphicsContext gc = canvas.getGraphicsContext2D();
-            gc.setFontSmoothingType(FontSmoothingType.GRAY);
-            gc.setFont(font);
-            gc.setFill(Color.WHITE);
-            gc.fillText(value, 0.0, baseline);
-
-            SnapshotParameters parameters = new SnapshotParameters();
-            parameters.setFill(Color.TRANSPARENT);
-            WritableImage snapshot = canvas.snapshot(parameters, null);
-            PixelReader reader = snapshot.getPixelReader();
-            byte[] alpha = new byte[glyphWidth * lineHeight];
-            for (int y = 0; y < lineHeight; y++) {
-                int offset = y * glyphWidth;
-                for (int x = 0; x < glyphWidth; x++) {
-                    alpha[offset + x] = (byte) ((reader.getArgb(x, y) >>> 24) & 0xff);
-                }
-            }
-            return new Glyph(glyphWidth, lineHeight, alpha);
-        }
-    }
-
-    private record Glyph(int width, int height, byte[] alpha) {
     }
 
     private record CursorState(boolean visible, boolean hasViewport, int column, int row, RenderCursorStyle style) {

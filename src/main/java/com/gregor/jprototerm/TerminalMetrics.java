@@ -23,6 +23,9 @@ public final class TerminalMetrics {
     private double cellWidth;
     private double lineHeight;
     private double baselineOffset;
+    // One rasterized-glyph atlas per window, shared by every pane's renderer (the masks are a pure
+    // function of the font geometry below). It self-invalidates when these metrics change.
+    private final GlyphCache glyphCache = new GlyphCache(this);
 
     public TerminalMetrics(String fontFamily, double fontSize) {
         setFont(fontFamily, fontSize);
@@ -57,6 +60,11 @@ public final class TerminalMetrics {
 
     public double baselineOffset() {
         return baselineOffset;
+    }
+
+    /** The window's shared glyph atlas (see {@link GlyphCache}). */
+    public GlyphCache glyphCache() {
+        return glyphCache;
     }
 
     /** Columns that fit in a pane of the given pixel width (after subtracting the padding). */

@@ -31,10 +31,17 @@ public final class Main extends Application {
 
     @Override
     public void start(Stage stage) {
+        // First mark: time from JVM start through JavaFX toolkit + GL pipeline init (start() is the
+        // first app code the toolkit runs). Usually the dominant slice of cold startup.
+        StartupTiming.mark("toolkit ready (start)");
         config = AppConfig.load();
+        StartupTiming.mark("config loaded");
 
         metrics = new TerminalMetrics(config.fontFamily(), config.fontSize());
+        StartupTiming.mark("fonts loaded");
         compositor = new Compositor(config, metrics);
+        // Includes the first Ghostty.open (native dlopen) and the first pty spawn.
+        StartupTiming.mark("compositor ready");
         // When the last pane closes — whether via the close-pane key or because a pane's process
         // exited on its own — tear down and quit.
         compositor.setOnEmpty(() -> {
@@ -60,6 +67,7 @@ public final class Main extends Application {
             @Override
             public void handle(long now) {
                 compositor.render();
+                StartupTiming.firstFrame();
             }
         }.start();
 
@@ -72,6 +80,7 @@ public final class Main extends Application {
         // to honour, so place it on the screen under the mouse pointer instead.
         centreOnActiveScreen(stage, config.windowWidth(), config.windowHeight());
         stage.show();
+        StartupTiming.mark("stage shown");
         // Ask the window manager to raise and focus the new window so the user can type right
         // away; the canvas requestFocus() below only routes events within the scene.
         stage.toFront();

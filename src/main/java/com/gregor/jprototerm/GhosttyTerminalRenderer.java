@@ -104,8 +104,15 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             software.paintFullOrShifted(gc, target.snapshotFull(), px, py, width, height, active);
         } else if (dirty == DIRTY_PARTIAL) {
             software.paintDirty(gc, target, snapshot, px, py, width, height, active);
+        } else if (software.cursorChanged(snapshot)) {
+            // dirty == FALSE means no cell content changed, but the cursor can still have moved,
+            // changed style, or toggled visibility on its own (e.g. plain cursor-left/right, or the
+            // hide/redraw/show dance fish does around a line edit). No row was marshalled, so diff
+            // against the full snapshot: it repaints just the old and new cursor rows and redraws
+            // the cursor. Without this the old cursor is left erased and the new one never drawn.
+            software.paintFullOrShifted(gc, target.snapshotFull(), px, py, width, height, active);
         }
-        // dirty == FALSE: nothing visible changed.
+        // dirty == FALSE with an unchanged cursor: nothing visible changed.
         gc.restore();
         kittyImageNodes = List.of();
     }
@@ -614,6 +621,12 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             resetDirty();
             pixelBuffer.updateBuffer(ignored -> dirty);
             gc.drawImage(image, px, py);
+        }
+
+        // Whether the cursor differs from what we last drew (position, style or visibility). Used to
+        // catch cursor-only updates that arrive with a FALSE global dirty flag.
+        private boolean cursorChanged(RenderStateSnapshot snapshot) {
+            return !CursorState.from(snapshot).equals(lastCursor);
         }
 
         private boolean canDiff(RenderStateSnapshot snapshot) {

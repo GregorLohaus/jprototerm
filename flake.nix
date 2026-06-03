@@ -122,6 +122,7 @@
                 | sha256sum | cut -c1-16).jsa"
 
               makeWrapper "${pkgs.jdk25}/bin/java" "$out/bin/jprototerm" \
+                --run 'if [ "$#" -eq 0 ]; then if [ -n "''${XDG_RUNTIME_DIR:-}" ]; then jprototermSock="$XDG_RUNTIME_DIR/jprototerm/daemon.sock"; else jprototermSock="/tmp/jprototerm-''${USER:-user}/daemon.sock"; fi; if [ -S "$jprototermSock" ] && printf "%s\n" "$(pwd)" | ${pkgs.socat}/bin/socat - UNIX-CONNECT:"$jprototermSock" >/dev/null 2>&1; then exit 0; fi; fi' \
                 --run 'export JPROTOTERM_HOST_LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:-}"' \
                 --run 'cdsDir="''${XDG_CACHE_HOME:-$HOME/.cache}/jprototerm"; mkdir -p "$cdsDir"' \
                 --add-flags "-XX:+AutoCreateSharedArchive" \

@@ -88,6 +88,14 @@ ln -sf "$(dirname "$(readlink -f "$(command -v jprototerm)")")/../share/systemd/
   ~/.config/systemd/user/jprototerm.service
 systemctl --user enable --now jprototerm.service
 ```
+After upgrading via nix profile upgrade: 
+```sh
+systemctl --user disable jprototerm
+ln -sf "$(dirname "$(readlink -f "$(command -v jprototerm)")")/../share/systemd/user/jprototerm.service" \
+  ~/.config/systemd/user/jprototerm.service
+systemctl --user enable --now jprototerm.service
+systemctl --user restart jprototerm.service
+```
 
 If the daemon can't reach your display (e.g. `systemctl --user status jprototerm` shows it
 failing to open a window), import the session variables once and restart it:

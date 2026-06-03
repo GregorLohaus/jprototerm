@@ -107,10 +107,11 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         } else if (software.cursorChanged(snapshot)) {
             // dirty == FALSE means no cell content changed, but the cursor can still have moved,
             // changed style, or toggled visibility on its own (e.g. plain cursor-left/right, or the
-            // hide/redraw/show dance fish does around a line edit). No row was marshalled, so diff
-            // against the full snapshot: it repaints just the old and new cursor rows and redraws
-            // the cursor. Without this the old cursor is left erased and the new one never drawn.
-            software.paintFullOrShifted(gc, target.snapshotFull(), px, py, width, height, active);
+            // hide/redraw/show dance fish does around a line edit). No row was marshalled, and we
+            // must not force a full snapshot here — that would re-marshal every cell on every
+            // cursor move. Instead restore the pixels saved beneath the old cursor (erasing it)
+            // and redraw the cursor at its new spot, touching only those two cell rects.
+            software.paintCursorOnly(gc, snapshot, px, py, width, height);
         }
         // dirty == FALSE with an unchanged cursor: nothing visible changed.
         gc.restore();
@@ -424,6 +425,15 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         private WritableImage image;
         private long[] rowHashes = new long[0];
         private CursorState lastCursor = CursorState.none();
+        // Pixels captured from beneath the cursor just before it was drawn, plus the clamped rect
+        // they came from. A cursor-only frame restores these to erase the old cursor without
+        // repainting the row's cells (which would need a full, freshly-marshalled snapshot).
+        private int[] cursorUnder = new int[0];
+        private int cursorUnderX;
+        private int cursorUnderY;
+        private int cursorUnderW;
+        private int cursorUnderH;
+        private boolean cursorSaved;
         // Half-open [min, max) vertical span of buffer rows written since the last present, so
         // present() can upload only that band to the GPU instead of the whole pane texture.
         private int dirtyMinY = Integer.MAX_VALUE;
@@ -432,6 +442,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         private void invalidate() {
             rowHashes = new long[0];
             lastCursor = CursorState.none();
+            cursorSaved = false;
         }
 
         // Record that buffer rows [y0, y1) changed; clamped to the buffer in dirtyRegion().
@@ -507,6 +518,23 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             lastCursor = cursor;
             drawCursor(snapshot);
             drawBorder(active);
+            present(gc, px, py);
+        }
+
+        // Repaint nothing but the cursor: restore the pixels beneath the old cursor to erase it,
+        // then draw the cursor at its new position (which re-saves the pixels under it). Used when
+        // the global dirty flag is FALSE but the cursor alone moved, styled or toggled visibility.
+        // Touches at most the two cursor cell rects, so it never marshals or hashes a full snapshot.
+        private void paintCursorOnly(GraphicsContext gc, RenderStateSnapshot snapshot,
+                double px, double py, double paneWidth, double paneHeight) {
+            ensure(paneWidth, paneHeight);
+            eraseCursorUnder();
+            if (snapshot != null) {
+                drawCursor(snapshot);
+                lastCursor = CursorState.from(snapshot);
+            } else {
+                lastCursor = CursorState.none();
+            }
             present(gc, px, py);
         }
 
@@ -873,6 +901,10 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             int y = contentTop() + ((int) snapshot.cursorViewportY() * lineHeight());
             int cw = cellWidth();
             int lh = lineHeight();
+            // Capture the cell box under the cursor before drawing, so a later cursor-only frame
+            // can restore it without repainting the row. The box is a superset of every style's
+            // footprint below, so the restore erases whichever style was actually drawn.
+            saveCursorUnder(x, y, cw, lh);
             RenderCursorStyle style = snapshot.cursorStyle();
             if (style == RenderCursorStyle.BAR) {
                 fillRect(x, y + 2, 1, Math.max(1, lh - 4), argbPre(DEFAULT_FOREGROUND));
@@ -883,6 +915,45 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             } else {
                 strokeRect(x, y + 1, Math.max(1, cw - 1), Math.max(1, lh - 2), argbPre(DEFAULT_FOREGROUND), 1);
             }
+        }
+
+        // Copy the clamped cell box under the cursor into the save-under buffer. Marks no dirty
+        // band — saving reads pixels, it doesn't change them.
+        private void saveCursorUnder(int x, int y, int w, int h) {
+            int x0 = Math.max(0, x);
+            int y0 = Math.max(0, y);
+            int x1 = Math.min(width, x + w);
+            int y1 = Math.min(height, y + h);
+            if (x0 >= x1 || y0 >= y1) {
+                cursorSaved = false;
+                return;
+            }
+            int rw = x1 - x0;
+            int rh = y1 - y0;
+            if (cursorUnder.length < rw * rh) {
+                cursorUnder = new int[rw * rh];
+            }
+            for (int row = 0; row < rh; row++) {
+                System.arraycopy(pixels, ((y0 + row) * width) + x0, cursorUnder, row * rw, rw);
+            }
+            cursorUnderX = x0;
+            cursorUnderY = y0;
+            cursorUnderW = rw;
+            cursorUnderH = rh;
+            cursorSaved = true;
+        }
+
+        // Restore the saved cell box, erasing the cursor that was drawn over it. No-op if nothing
+        // is currently saved (cursor hidden, or buffer reset since the last draw).
+        private void eraseCursorUnder() {
+            if (!cursorSaved) {
+                return;
+            }
+            for (int row = 0; row < cursorUnderH; row++) {
+                System.arraycopy(cursorUnder, row * cursorUnderW, pixels, ((cursorUnderY + row) * width) + cursorUnderX, cursorUnderW);
+            }
+            markDirtyRows(cursorUnderY, cursorUnderY + cursorUnderH);
+            cursorSaved = false;
         }
 
         private void drawBorder(boolean active) {

@@ -244,19 +244,19 @@ final class Tab implements AutoCloseable {
     }
 
     /** Promotes the active floating pane to a tiled pane, joining the tiled row. No-op otherwise. */
-    void promoteActiveFloating() {
-        TerminalPane promote = active;
-        if (!floating.remove(promote)) {
-            return; // active pane is tiled (or there is none); nothing to promote
-        }
-        if (promote == lastFocusedFloating) {
+    void toggleActiveFloating() {
+        TerminalPane toggled = active;
+        if (floating.remove(toggled)) {
             lastFocusedFloating = floating.isEmpty() ? null : floating.get(floating.size() - 1);
-        }
-        tiled.add(promote);
-        if (floating.isEmpty()) {
+            tiled.add(toggled);
             floatingVisible = false;
+            setActive(toggled);
+        } else if (tiled.remove(toggled)) {
+            lastFocusedTiled = tiled.isEmpty() ? null : tiled.get(tiled.size() -1);
+            floating.add(toggled);
+            floatingVisible = true;
+            setActive(toggled);
         }
-        setActive(promote);
     }
 
     void closeActivePane() {

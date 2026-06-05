@@ -180,11 +180,11 @@ public final class Compositor {
         layoutVersion++;
     }
 
-    public void promoteActiveFloating() {
+    public void toggleActiveFloating() {
         if (isEmpty()) {
             return;
         }
-        currentTab().promoteActiveFloating();
+        currentTab().toggleActiveFloating();
         layoutVersion++;
     }
 

@@ -129,7 +129,7 @@ final class TerminalWindow {
             compositor.nextFloatingPane();
             event.consume();
         } else if (config.keybindings().get("promote_floating").matches(event)) {
-            compositor.promoteActiveFloating();
+            compositor.toggleActiveFloating();
             event.consume();
         } else if (config.keybindings().get("close_pane").matches(event)) {
             // Closing the last pane closes this window, via the compositor's onEmpty hook.

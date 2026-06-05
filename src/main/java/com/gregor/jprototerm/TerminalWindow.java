@@ -86,7 +86,7 @@ final class TerminalWindow {
 
     /**
      * Fully tears this window down (FX thread, idempotent): stops rendering, closes the compositor —
-     * which reaps the pane shells via the configured {@code close_signal} — disposes the Stage, and
+     * which signals pane shells via the configured {@code close_signal} — disposes the Stage, and
      * notifies the manager so it can drop the window (and, in standalone mode, exit the JVM). Both
      * the WM close button and the last-pane-closed hook route through here.
      */

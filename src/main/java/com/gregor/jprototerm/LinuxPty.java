@@ -15,6 +15,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * A Linux PTY backed by libc via the Foreign Function & Memory API.
@@ -33,6 +35,11 @@ import java.util.Map;
 public final class LinuxPty implements AutoCloseable {
     static final Linker LINKER = Linker.nativeLinker();
     private static final SymbolLookup LIBC = LINKER.defaultLookup();
+    private static final ExecutorService REAPER = Executors.newCachedThreadPool(runnable -> {
+        Thread thread = new Thread(runnable, "pty-reaper");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     static final AddressLayout C_POINTER = (AddressLayout) LINKER.canonicalLayouts().get("void*");
     static final ValueLayout.OfShort C_SHORT = (ValueLayout.OfShort) LINKER.canonicalLayouts().get("short");
@@ -275,14 +282,43 @@ public final class LinuxPty implements AutoCloseable {
 
     @Override
     public void close() {
-        if (closed) {
+        if (!markClosed()) {
             return;
         }
+        closeMaster();
+        try {
+            reap();
+        } finally {
+            arena.close();
+        }
+    }
+
+    /** Send the configured close signal and close the master fd now; reap off the caller thread. */
+    public void closeDetached() {
+        if (!markClosed()) {
+            return;
+        }
+        closeMaster();
+        REAPER.submit(() -> {
+            try {
+                reap();
+            } finally {
+                arena.close();
+            }
+        });
+    }
+
+    private synchronized boolean markClosed() {
+        if (closed) {
+            return false;
+        }
         closed = true;
+        return true;
+    }
+
+    private void closeMaster() {
         callKill(pid, closeSignal);
         callInt(CLOSE, masterFd);
-        reap();
-        arena.close();
     }
 
     private void reap() {

@@ -180,8 +180,27 @@ public final class ShellSession implements AutoCloseable {
 
     @Override
     public void close() {
-        closed = true;
+        if (!markClosed()) {
+            return;
+        }
         reader.shutdownNow();
         pty.close();
+    }
+
+    /** Signal and disconnect the pty immediately, but leave child reaping to a background thread. */
+    public void closeDetached() {
+        if (!markClosed()) {
+            return;
+        }
+        reader.shutdownNow();
+        pty.closeDetached();
+    }
+
+    private synchronized boolean markClosed() {
+        if (closed) {
+            return false;
+        }
+        closed = true;
+        return true;
     }
 }

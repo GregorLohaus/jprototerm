@@ -383,7 +383,7 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
     @Override
     public void close() {
         if (session != null) {
-            session.close();
+            session.closeDetached();
             session = null;
         }
         mouseEncoder.close();

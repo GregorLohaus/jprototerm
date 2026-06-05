@@ -121,12 +121,21 @@
                 "com.gregor.jprototerm.Main" \
                 | sha256sum | cut -c1-16).jsa"
 
+              # Prism frees GPU textures (and the X11 pixmaps behind them) only from phantom-ref
+              # Disposers that run during a GC. This daemon is one long-lived JVM whose ~140MB heap
+              # never nears the multi-GB default ceiling, so G1 almost never collects, the Disposers
+              # never run, and orphaned render resources (closed panes/windows, resized backbuffers)
+              # pile up until the X server's VRAM is exhausted and the whole session freezes. -Xmx
+              # makes output churn drive GC; G1PeriodicGCInterval runs a concurrent (low-pause) GC on
+              # an idle timer so an idle daemon still reclaims. The live heap is tiny, so GC is cheap.
               makeWrapper "${pkgs.jdk25}/bin/java" "$out/bin/jprototerm" \
                 --run 'if [ "$#" -eq 0 ]; then if [ -n "''${XDG_RUNTIME_DIR:-}" ]; then jprototermSock="$XDG_RUNTIME_DIR/jprototerm/daemon.sock"; else jprototermSock="/tmp/jprototerm-''${USER:-user}/daemon.sock"; fi; if [ -S "$jprototermSock" ] && printf "%s\n" "$(pwd)" | ${pkgs.socat}/bin/socat - UNIX-CONNECT:"$jprototermSock" >/dev/null 2>&1; then exit 0; fi; fi' \
                 --run 'export JPROTOTERM_HOST_LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:-}"' \
                 --run 'cdsDir="''${XDG_CACHE_HOME:-$HOME/.cache}/jprototerm"; mkdir -p "$cdsDir"' \
                 --add-flags "-XX:+AutoCreateSharedArchive" \
                 --add-flags "-XX:SharedArchiveFile=\$cdsDir/$cdsArchive" \
+                --add-flags "-Xmx512m" \
+                --add-flags "-XX:G1PeriodicGCInterval=5000" \
                 --add-flags "--enable-native-access=ALL-UNNAMED,javafx.graphics" \
                 --add-flags "--module-path $out/share/jprototerm/javafx" \
                 --add-flags "--add-modules javafx.controls,javafx.fxml" \

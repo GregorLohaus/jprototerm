@@ -86,15 +86,24 @@ final class Tab implements AutoCloseable {
         }
         List<TerminalPane> ordered = new ArrayList<>(tiled.size() + floating.size());
         ordered.addAll(tiled);
+        ordered.addAll(floatingOrder());
+        return List.copyOf(ordered);
+    }
+
+    // Floating panes bottom-to-top: insertion order, with the active pane moved to the top.
+    // Single source of the stacking order, so the clips assigned in assignClips() always match
+    // the compositing order in panes().
+    private List<TerminalPane> floatingOrder() {
+        List<TerminalPane> order = new ArrayList<>(floating.size());
         for (TerminalPane pane : floating) {
             if (pane != active) {
-                ordered.add(pane);
+                order.add(pane);
             }
         }
         if (floating.contains(active)) {
-            ordered.add(active); // active floating pane on top
+            order.add(active);
         }
-        return List.copyOf(ordered);
+        return order;
     }
 
     boolean isActive(TerminalPane pane) {
@@ -154,27 +163,18 @@ final class Tab implements AutoCloseable {
     // every pane clips to its plain bounds.
     private void assignClips() {
         if (!floatingVisible || floating.isEmpty()) {
-            tiled.forEach(pane -> pane.setClip(null));
-            floating.forEach(pane -> pane.setClip(null));
+            allPanes().forEach(pane -> pane.setClip(null));
             return;
         }
 
-        // Floating panes bottom-to-top, matching panes(): insertion order, active pane on top.
-        List<TerminalPane> order = new ArrayList<>(floating.size());
-        for (TerminalPane pane : floating) {
-            if (pane != active) {
-                order.add(pane);
-            }
-        }
-        if (floating.contains(active)) {
-            order.add(active);
-        }
-
-        // Walk top-to-bottom, accumulating the union of the panes above each one.
+        // Walk the floating stack top-to-bottom, accumulating the union of the panes above
+        // each one. The topmost pane has nothing above it and keeps an unclipped bounds.
+        List<TerminalPane> order = floatingOrder();
         Shape above = null;
         for (int i = order.size() - 1; i >= 0; i--) {
-            Rectangle rect = rectOf(order.get(i));
-            order.get(i).setClip(above == null ? null : Shape.subtract(rect, above));
+            TerminalPane pane = order.get(i);
+            Rectangle rect = rectOf(pane);
+            pane.setClip(above == null ? null : Shape.subtract(rect, above));
             above = (above == null) ? rect : Shape.union(above, rect);
         }
 

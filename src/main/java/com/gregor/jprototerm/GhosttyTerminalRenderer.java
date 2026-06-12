@@ -18,7 +18,6 @@ import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.PixelBuffer;
 import javafx.scene.image.WritableImage;
-import javafx.scene.paint.Color;
 
 import java.io.ByteArrayInputStream;
 import java.nio.IntBuffer;
@@ -40,19 +39,17 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     private static final int DIRTY_PARTIAL = 1;
     private static final int DIRTY_FULL = 2;
 
-    private static final Color DEFAULT_FOREGROUND = Color.rgb(225, 229, 235);
-    private static final Color SELECTED_BACKGROUND = Color.rgb(52, 92, 140);
+    // All colors are packed ARGB ints (alpha always 0xff): the software backbuffer never needs
+    // a javafx Color, so cells go straight from RenderColor to the pixel format.
+    private static final int DEFAULT_FOREGROUND = 0xffe1e5eb; // rgb(225, 229, 235)
+    private static final int SELECTED_BACKGROUND = 0xff345c8c; // rgb(52, 92, 140)
     // The default cell background (used for cells with no explicit bg, and as the foreground
     // for reverse-video cells whose background is the terminal default).
-    private static final Color PANE_BACKGROUND = Color.rgb(9, 10, 12);
-    private static final Color ACTIVE_BORDER = Color.rgb(87, 166, 255);
-    private static final Color INACTIVE_BORDER = Color.rgb(52, 57, 65);
-    private static final Color CURSOR_FILL = Color.rgb(225, 229, 235, 0.28);
-
-    // A full-screen redraw asks for one Color per cell; most cells share a handful of colors,
-    // so cache them by packed RGB instead of allocating a Color each time. Bounded so a
-    // truecolor gradient can't grow it without limit.
-    private static final Map<Integer, Color> COLOR_CACHE = new HashMap<>();
+    private static final int PANE_BACKGROUND = 0xff090a0c; // rgb(9, 10, 12)
+    private static final int ACTIVE_BORDER = 0xff57a6ff; // rgb(87, 166, 255)
+    private static final int INACTIVE_BORDER = 0xff343941; // rgb(52, 57, 65)
+    // Block cursor: DEFAULT_FOREGROUND blended at 28% alpha by fillRectAlpha.
+    private static final int CURSOR_FILL_ALPHA = 71;
 
     private final TerminalMetrics metrics;
     // Decoded kitty images for this renderer's pane (kitty graphics state is per-terminal).
@@ -131,16 +128,12 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
 
     // Effective background colour of a cell as it is drawn (reverse video swaps fg/bg, an
     // unset colour falls back to the defaults).
-    private static Color cellBackgroundColor(RenderCell cell) {
-        if (cell.inverse()) {
-            var fg = cell.foreground();
-            return fg.isPresent() ? toFxColor(fg.get()) : DEFAULT_FOREGROUND;
-        }
-        var bg = cell.background();
-        return bg.isPresent() ? toFxColor(bg.get()) : PANE_BACKGROUND;
+    private static int cellBackgroundColor(RenderCell cell) {
+        int override = cellBackgroundOverride(cell);
+        return override != 0 ? override : PANE_BACKGROUND;
     }
 
-    private static Color rowEdgeBackground(RenderRow row, boolean firstCell) {
+    private static int rowEdgeBackground(RenderRow row, boolean firstCell) {
         List<RenderCell> cells = row.cells();
         if (cells.isEmpty()) {
             return PANE_BACKGROUND;
@@ -148,41 +141,28 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         return cellBackgroundColor(firstCell ? cells.get(0) : cells.get(cells.size() - 1));
     }
 
-    // Background override for a cell: null means the pane default background already covers it.
-    private static Color cellBackgroundOverride(RenderCell cell) {
+    // Background override for a cell: 0 means the pane default background already covers it
+    // (real colors always carry 0xff alpha, so 0 is never a valid color).
+    private static int cellBackgroundOverride(RenderCell cell) {
         if (cell.inverse()) {
             var fg = cell.foreground();
-            return fg.isPresent() ? toFxColor(fg.get()) : DEFAULT_FOREGROUND;
+            return fg.isPresent() ? packArgb(fg.get()) : DEFAULT_FOREGROUND;
         }
-        var bgOpt = cell.background();
-        Color bg = bgOpt.isPresent() ? toFxColor(bgOpt.get()) : null;
-        return bg;
+        var bg = cell.background();
+        return bg.isPresent() ? packArgb(bg.get()) : 0;
     }
 
-    private static Color cellForegroundColor(RenderCell cell) {
-        var fgOpt = cell.foreground();
-        var bgOpt = cell.background();
-        Color fg = fgOpt.isPresent() ? toFxColor(fgOpt.get()) : DEFAULT_FOREGROUND;
-        Color bg = bgOpt.isPresent() ? toFxColor(bgOpt.get()) : null;
-
+    private static int cellForegroundColor(RenderCell cell) {
         if (cell.inverse()) {
-            return (bg != null) ? bg : PANE_BACKGROUND;
+            var bg = cell.background();
+            return bg.isPresent() ? packArgb(bg.get()) : PANE_BACKGROUND;
         }
-        return fg;
+        var fg = cell.foreground();
+        return fg.isPresent() ? packArgb(fg.get()) : DEFAULT_FOREGROUND;
     }
 
-    private static Color toFxColor(RenderColor color) {
-        int key = (color.red() << 16) | (color.green() << 8) | color.blue();
-        Color cached = COLOR_CACHE.get(key);
-        if (cached != null) {
-            return cached;
-        }
-        if (COLOR_CACHE.size() >= 4096) {
-            COLOR_CACHE.clear();
-        }
-        Color created = Color.rgb(color.red(), color.green(), color.blue());
-        COLOR_CACHE.put(key, created);
-        return created;
+    private static int packArgb(RenderColor color) {
+        return 0xff000000 | (color.red() << 16) | (color.green() << 8) | color.blue();
     }
 
     // ---- Kitty graphics --------------------------------------------------------------
@@ -474,7 +454,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         private void paintFull(GraphicsContext gc, RenderStateSnapshot snapshot,
                 double px, double py, double paneWidth, double paneHeight, boolean active) {
             ensure(paneWidth, paneHeight);
-            fillRect(0, 0, width, height, argbPre(PANE_BACKGROUND));
+            fillRect(0, 0, width, height, PANE_BACKGROUND);
             if (snapshot != null) {
                 paintSnapshot(snapshot);
                 drawCursor(snapshot);
@@ -574,11 +554,6 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                     return;
                 }
             }
-            if (repaintedRowHasCursor(newCursorRow, repainted)
-                    && !repaintCursorRow(snapshot, newCursorRow, repainted)) {
-                paintFullOrShifted(gc, target.snapshotFull(), px, py, paneWidth, paneHeight, active);
-                return;
-            }
             lastCursor = cursor;
             if (needsCursorDraw) {
                 drawCursor(snapshot);
@@ -599,10 +574,6 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             rowHashes[rowIndex] = rowHash(row);
             repainted[rowIndex] = true;
             return true;
-        }
-
-        private boolean repaintedRowHasCursor(int rowIndex, boolean[] repainted) {
-            return rowIndex >= 0 && rowIndex < repainted.length && repainted[rowIndex];
         }
 
         private RenderRow rowByIndex(RenderStateSnapshot snapshot, int rowIndex) {
@@ -737,7 +708,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             // per-strip fillRect calls don't touch, so mark the full content band for upload.
             markDirtyRows(top, top + contentHeight);
             if (dy == 0 || Math.abs(dy) >= contentHeight) {
-                fillRect(0, top, width, contentHeight, argbPre(PANE_BACKGROUND));
+                fillRect(0, top, width, contentHeight, PANE_BACKGROUND);
                 return;
             }
 
@@ -748,7 +719,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                 for (int y = 0; y < copyHeight; y++) {
                     System.arraycopy(pixels, (srcY + y) * width, pixels, (dstY + y) * width, width);
                 }
-                fillRect(0, top + copyHeight, width, -dy, argbPre(PANE_BACKGROUND));
+                fillRect(0, top + copyHeight, width, -dy, PANE_BACKGROUND);
             } else {
                 int srcY = top;
                 int dstY = top + dy;
@@ -756,7 +727,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                 for (int y = copyHeight - 1; y >= 0; y--) {
                     System.arraycopy(pixels, (srcY + y) * width, pixels, (dstY + y) * width, width);
                 }
-                fillRect(0, top, width, dy, argbPre(PANE_BACKGROUND));
+                fillRect(0, top, width, dy, PANE_BACKGROUND);
             }
         }
 
@@ -767,8 +738,8 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             }
             int top = contentTop();
             int contentBottom = top + snapshot.rows() * lineHeight();
-            fillRect(0, 0, width, top, argbPre(rowEdgeBackground(rows.get(0), true)));
-            fillRect(0, contentBottom, width, height - contentBottom, argbPre(rowEdgeBackground(rows.get(rows.size() - 1), true)));
+            fillRect(0, 0, width, top, rowEdgeBackground(rows.get(0), true));
+            fillRect(0, contentBottom, width, height - contentBottom, rowEdgeBackground(rows.get(rows.size() - 1), true));
             for (RenderRow row : rows) {
                 paintRow(row);
             }
@@ -777,13 +748,13 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         private void paintRow(RenderRow row) {
             int rowTop = contentTop() + (row.row() * lineHeight());
             int rowHeight = lineHeight();
-            fillRect(0, rowTop, width, rowHeight, argbPre(PANE_BACKGROUND));
+            fillRect(0, rowTop, width, rowHeight, PANE_BACKGROUND);
             if (row.row() == 0) {
-                fillRect(0, 0, width, contentTop(), argbPre(rowEdgeBackground(row, true)));
+                fillRect(0, 0, width, contentTop(), rowEdgeBackground(row, true));
             }
             if (row.row() == rowHashes.length - 1) {
                 int bottom = contentTop() + (rowHashes.length * lineHeight());
-                fillRect(0, bottom, width, height - bottom, argbPre(rowEdgeBackground(row, true)));
+                fillRect(0, bottom, width, height - bottom, rowEdgeBackground(row, true));
             }
             paintRowSidePadding(row, rowTop, rowHeight);
             paintRowBackgrounds(row, rowTop, rowHeight);
@@ -797,31 +768,30 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             }
             int left = contentLeft();
             int contentRight = left + (cells.size() * cellWidth());
-            fillRect(0, rowTop, left, rowHeight, argbPre(rowEdgeBackground(row, true)));
-            fillRect(contentRight, rowTop, width - contentRight, rowHeight, argbPre(rowEdgeBackground(row, false)));
+            fillRect(0, rowTop, left, rowHeight, rowEdgeBackground(row, true));
+            fillRect(contentRight, rowTop, width - contentRight, rowHeight, rowEdgeBackground(row, false));
         }
 
         private void paintRowBackgrounds(RenderRow row, int rowTop, int rowHeight) {
-            int cellWidth = cellWidth();
-            Color runBackground = null;
+            int runBackground = 0;
             int runStartColumn = 0;
             int previousColumn = -1;
             for (RenderCell cell : row.cells()) {
                 if (cell.kittyPlaceholder().isPresent()) {
                     flushBackground(runBackground, runStartColumn, previousColumn, rowTop, rowHeight);
-                    runBackground = null;
+                    runBackground = 0;
                     previousColumn = -1;
                     continue;
                 }
 
-                Color bg = cell.selected() ? SELECTED_BACKGROUND : cellBackgroundOverride(cell);
-                if (bg == null) {
+                int bg = cell.selected() ? SELECTED_BACKGROUND : cellBackgroundOverride(cell);
+                if (bg == 0) {
                     flushBackground(runBackground, runStartColumn, previousColumn, rowTop, rowHeight);
-                    runBackground = null;
+                    runBackground = 0;
                     previousColumn = -1;
                     continue;
                 }
-                if (runBackground == null || bg != runBackground || cell.column() != previousColumn + 1) {
+                if (bg != runBackground || cell.column() != previousColumn + 1) {
                     flushBackground(runBackground, runStartColumn, previousColumn, rowTop, rowHeight);
                     runBackground = bg;
                     runStartColumn = cell.column();
@@ -831,12 +801,12 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             flushBackground(runBackground, runStartColumn, previousColumn, rowTop, rowHeight);
         }
 
-        private void flushBackground(Color background, int startColumn, int endColumn, int rowTop, int rowHeight) {
-            if (background == null || endColumn < startColumn) {
+        private void flushBackground(int background, int startColumn, int endColumn, int rowTop, int rowHeight) {
+            if (background == 0 || endColumn < startColumn) {
                 return;
             }
             fillRect(contentLeft() + (startColumn * cellWidth()), rowTop,
-                    (endColumn - startColumn + 1) * cellWidth(), rowHeight, argbPre(background));
+                    (endColumn - startColumn + 1) * cellWidth(), rowHeight, background);
         }
 
         private void paintRowText(RenderRow row, int rowTop) {
@@ -847,8 +817,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
                     continue;
                 }
                 GlyphCache.Glyph glyph = metrics.glyphCache().glyph(cell.text());
-                int color = rgb(cellForegroundColor(cell));
-                blitGlyph(glyph, x0 + (cell.column() * cellWidth), rowTop, color);
+                blitGlyph(glyph, x0 + (cell.column() * cellWidth), rowTop, cellForegroundColor(cell));
             }
         }
 
@@ -907,13 +876,13 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             saveCursorUnder(x, y, cw, lh);
             RenderCursorStyle style = snapshot.cursorStyle();
             if (style == RenderCursorStyle.BAR) {
-                fillRect(x, y + 2, 1, Math.max(1, lh - 4), argbPre(DEFAULT_FOREGROUND));
+                fillRect(x, y + 2, 1, Math.max(1, lh - 4), DEFAULT_FOREGROUND);
             } else if (style == RenderCursorStyle.UNDERLINE) {
-                fillRect(x + 1, y + lh - 2, Math.max(1, cw - 2), 1, argbPre(DEFAULT_FOREGROUND));
+                fillRect(x + 1, y + lh - 2, Math.max(1, cw - 2), 1, DEFAULT_FOREGROUND);
             } else if (style == RenderCursorStyle.BLOCK) {
-                fillRectAlpha(x, y + 1, Math.max(1, cw - 1), Math.max(1, lh - 2), CURSOR_FILL);
+                fillRectAlpha(x, y + 1, Math.max(1, cw - 1), Math.max(1, lh - 2), DEFAULT_FOREGROUND, CURSOR_FILL_ALPHA);
             } else {
-                strokeRect(x, y + 1, Math.max(1, cw - 1), Math.max(1, lh - 2), argbPre(DEFAULT_FOREGROUND), 1);
+                strokeRect(x, y + 1, Math.max(1, cw - 1), Math.max(1, lh - 2), DEFAULT_FOREGROUND, 1);
             }
         }
 
@@ -957,7 +926,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
         }
 
         private void drawBorder(boolean active) {
-            strokeRect(0, 0, width, height, argbPre(active ? ACTIVE_BORDER : INACTIVE_BORDER), active ? 2 : 1);
+            strokeRect(0, 0, width, height, active ? ACTIVE_BORDER : INACTIVE_BORDER, active ? 2 : 1);
         }
 
         private void strokeRect(int x, int y, int w, int h, int color, int lineWidth) {
@@ -974,9 +943,7 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
             }
         }
 
-        private void fillRectAlpha(int x, int y, int w, int h, Color color) {
-            int alpha = (int) Math.round(color.getOpacity() * 255.0);
-            int rgb = rgb(color);
+        private void fillRectAlpha(int x, int y, int w, int h, int rgb, int alpha) {
             int red = (rgb >> 16) & 0xff;
             int green = (rgb >> 8) & 0xff;
             int blue = rgb & 0xff;
@@ -1080,21 +1047,6 @@ final class GhosttyTerminalRenderer extends TerminalRenderer {
     private static long mix(long hash, long value) {
         hash ^= value;
         return hash * 0x100000001b3L;
-    }
-
-    private static int rgb(Color color) {
-        int red = (int) Math.round(color.getRed() * 255.0);
-        int green = (int) Math.round(color.getGreen() * 255.0);
-        int blue = (int) Math.round(color.getBlue() * 255.0);
-        return (red << 16) | (green << 8) | blue;
-    }
-
-    private static int argbPre(Color color) {
-        int alpha = (int) Math.round(color.getOpacity() * 255.0);
-        int red = (int) Math.round(color.getRed() * alpha);
-        int green = (int) Math.round(color.getGreen() * alpha);
-        int blue = (int) Math.round(color.getBlue() * alpha);
-        return (alpha << 24) | (red << 16) | (green << 8) | blue;
     }
 
     // A kitty image is immutable for a given (id, number); re-transmitting under the same id

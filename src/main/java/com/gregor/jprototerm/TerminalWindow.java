@@ -20,7 +20,9 @@ import javafx.stage.Stage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * One top-level terminal window: its own {@link Stage}, {@link Compositor}, config/metrics, render
@@ -34,6 +36,9 @@ final class TerminalWindow {
     private final Compositor compositor;
     private final Stage stage;
     private final AnimationTimer renderLoop;
+    // Key-bound actions by their config keybinding name, checked in this order on each key press
+    // (the keys must match AppConfig's keybinding keys).
+    private final Map<String, Runnable> keyActions = new LinkedHashMap<>();
     private AppConfig config;
     private boolean closed;
 
@@ -50,6 +55,23 @@ final class TerminalWindow {
 
         // The last pane closing closes this window (not the JVM); see teardown().
         compositor.setOnEmpty(this::teardown);
+
+        keyActions.put("navigate_left", () -> compositor.navigate(Direction.LEFT));
+        keyActions.put("navigate_down", () -> compositor.navigate(Direction.DOWN));
+        keyActions.put("navigate_up", () -> compositor.navigate(Direction.UP));
+        keyActions.put("navigate_right", () -> compositor.navigate(Direction.RIGHT));
+        keyActions.put("toggle_floating", compositor::toggleFloating);
+        keyActions.put("new_pane", compositor::createPane);
+        keyActions.put("next_floating", compositor::nextFloatingPane);
+        keyActions.put("promote_floating", compositor::toggleActiveFloating);
+        // Closing the last pane closes this window, via the compositor's onEmpty hook.
+        keyActions.put("close_pane", compositor::closeActivePane);
+        keyActions.put("new_tab", compositor::newTab);
+        keyActions.put("previous_tab", compositor::previousTab);
+        keyActions.put("next_tab", compositor::nextTab);
+        keyActions.put("open_font_selector", this::openFontSelector);
+        keyActions.put("open_scrollback", this::openScrollbackInEditor);
+        keyActions.put("paste", this::pasteFromClipboard);
 
         StackPane root = new StackPane(compositor.canvas(), compositor.imageOverlay());
         compositor.canvas().widthProperty().bind(root.widthProperty());
@@ -107,58 +129,17 @@ final class TerminalWindow {
     }
 
     private void handlePressed(KeyEvent event) {
-        if (config.keybindings().get("navigate_left").matches(event)) {
-            compositor.navigate(Direction.LEFT);
-            event.consume();
-        } else if (config.keybindings().get("navigate_down").matches(event)) {
-            compositor.navigate(Direction.DOWN);
-            event.consume();
-        } else if (config.keybindings().get("navigate_up").matches(event)) {
-            compositor.navigate(Direction.UP);
-            event.consume();
-        } else if (config.keybindings().get("navigate_right").matches(event)) {
-            compositor.navigate(Direction.RIGHT);
-            event.consume();
-        } else if (config.keybindings().get("toggle_floating").matches(event)) {
-            compositor.toggleFloating();
-            event.consume();
-        } else if (config.keybindings().get("new_pane").matches(event)) {
-            compositor.createPane();
-            event.consume();
-        } else if (config.keybindings().get("next_floating").matches(event)) {
-            compositor.nextFloatingPane();
-            event.consume();
-        } else if (config.keybindings().get("promote_floating").matches(event)) {
-            compositor.toggleActiveFloating();
-            event.consume();
-        } else if (config.keybindings().get("close_pane").matches(event)) {
-            // Closing the last pane closes this window, via the compositor's onEmpty hook.
-            compositor.closeActivePane();
-            event.consume();
-        } else if (config.keybindings().get("new_tab").matches(event)) {
-            compositor.newTab();
-            event.consume();
-        } else if (config.keybindings().get("previous_tab").matches(event)) {
-            compositor.previousTab();
-            event.consume();
-        } else if (config.keybindings().get("next_tab").matches(event)) {
-            compositor.nextTab();
-            event.consume();
-        } else if (config.keybindings().get("open_font_selector").matches(event)) {
-            openFontSelector();
-            event.consume();
-        } else if (config.keybindings().get("open_scrollback").matches(event)) {
-            openScrollbackInEditor();
-            event.consume();
-        } else if (config.keybindings().get("paste").matches(event)) {
-            pasteFromClipboard();
-            event.consume();
-        } else {
-            String encoded = KeyEncoder.encode(event);
-            if (encoded != null) {
-                compositor.activePane().send(encoded);
+        for (Map.Entry<String, Runnable> action : keyActions.entrySet()) {
+            if (config.keybindings().get(action.getKey()).matches(event)) {
+                action.getValue().run();
                 event.consume();
+                return;
             }
+        }
+        String encoded = KeyEncoder.encode(event);
+        if (encoded != null) {
+            compositor.activePane().send(encoded);
+            event.consume();
         }
     }
 

@@ -134,29 +134,11 @@ public final class Compositor {
     }
 
     public void toggleFloating() {
-        if (isEmpty()) {
-            return;
-        }
-        currentTab().toggleFloating();
-        layoutVersion++;
+        mutateCurrentTab(() -> currentTab().toggleFloating());
     }
 
     public void createPane() {
-        if (isEmpty()) {
-            return;
-        }
-        currentTab().createPane();
-        layoutVersion++;
-    }
-
-    /** Opens a new floating pane, makes it active, and returns it (null when no tab exists). */
-    public TerminalPane openFloatingPane() {
-        if (isEmpty()) {
-            return null;
-        }
-        TerminalPane pane = currentTab().createFloatingPane();
-        layoutVersion++;
-        return pane;
+        mutateCurrentTab(() -> currentTab().createPane());
     }
 
     /**
@@ -173,18 +155,20 @@ public final class Compositor {
     }
 
     public void nextFloatingPane() {
-        if (isEmpty()) {
-            return;
-        }
-        currentTab().nextFloatingPane();
-        layoutVersion++;
+        mutateCurrentTab(() -> currentTab().nextFloatingPane());
     }
 
     public void toggleActiveFloating() {
+        mutateCurrentTab(() -> currentTab().toggleActiveFloating());
+    }
+
+    // Run a structural change on the current tab and bump the layout version so the next frame
+    // recomposites. No-op when no tab is left.
+    private void mutateCurrentTab(Runnable change) {
         if (isEmpty()) {
             return;
         }
-        currentTab().toggleActiveFloating();
+        change.run();
         layoutVersion++;
     }
 

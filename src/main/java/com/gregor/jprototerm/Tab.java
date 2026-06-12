@@ -259,12 +259,6 @@ final class Tab implements AutoCloseable {
         }
     }
 
-    void closeActivePane() {
-        if (active != null) {
-            closePane(active);
-        }
-    }
-
     /**
      * Closes {@code closing} (the active pane on a key-bound close, or any pane whose process just
      * exited) and re-selects the active pane only when the one that closed was active. Returns
@@ -329,8 +323,8 @@ final class Tab implements AutoCloseable {
         }
     }
 
-    TerminalPane createFloatingPane() {
-        return addFloating(openPane(true));
+    private void createFloatingPane() {
+        addFloating(openPane(true));
     }
 
     /**

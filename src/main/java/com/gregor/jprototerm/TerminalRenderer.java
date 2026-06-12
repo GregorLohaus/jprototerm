@@ -41,34 +41,28 @@ abstract class TerminalRenderer {
     void release() {
     }
 
-    protected static void clipRect(GraphicsContext gc, double x, double y, double width, double height) {
-        gc.beginPath();
-        gc.rect(x, y, width, height);
-        gc.clip();
-    }
-
     /**
      * Clip to {@code region} if given (the pane's rect minus the panes covering it, computed by
      * {@code Shape.subtract} at layout), otherwise to the plain rect. The region is a rectilinear
      * path, so it replays onto the canvas as move/line/close segments.
      */
     protected static void clip(GraphicsContext gc, double x, double y, double width, double height, Shape region) {
-        if (region == null) {
-            clipRect(gc, x, y, width, height);
-            return;
-        }
-        var elements = ((Path) region).getElements();
         gc.beginPath();
-        if (elements.isEmpty()) {
-            gc.rect(x, y, 0.0, 0.0); // fully covered: clip to nothing
-        }
-        for (PathElement element : elements) {
-            if (element instanceof MoveTo moveTo) {
-                gc.moveTo(moveTo.getX(), moveTo.getY());
-            } else if (element instanceof LineTo lineTo) {
-                gc.lineTo(lineTo.getX(), lineTo.getY());
-            } else if (element instanceof ClosePath) {
-                gc.closePath();
+        if (region == null) {
+            gc.rect(x, y, width, height);
+        } else {
+            var elements = ((Path) region).getElements();
+            if (elements.isEmpty()) {
+                gc.rect(x, y, 0.0, 0.0); // fully covered: clip to nothing
+            }
+            for (PathElement element : elements) {
+                if (element instanceof MoveTo moveTo) {
+                    gc.moveTo(moveTo.getX(), moveTo.getY());
+                } else if (element instanceof LineTo lineTo) {
+                    gc.lineTo(lineTo.getX(), lineTo.getY());
+                } else if (element instanceof ClosePath) {
+                    gc.closePath();
+                }
             }
         }
         gc.clip();

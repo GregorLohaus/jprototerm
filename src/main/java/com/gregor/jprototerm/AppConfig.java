@@ -55,7 +55,7 @@ public record AppConfig(
         AppConfig defaults = defaults();
         Path path = configPath();
         if (!Files.isRegularFile(path)) {
-            writeDefaultConfig(path, defaults);
+            save(path, defaults);
             return defaults;
         }
 
@@ -193,10 +193,6 @@ public record AppConfig(
             parsed.put(key, binding(table, "keybindings." + key, defaults.keybindings.get(key)));
         }
         return Map.copyOf(parsed);
-    }
-
-    private static void writeDefaultConfig(Path path, AppConfig defaults) {
-        save(path, defaults);
     }
 
     private static void save(Path path, AppConfig config) {
@@ -340,15 +336,7 @@ public record AppConfig(
     }
 
     private static int intValue(TomlTable table, String key, int fallback) {
-        TomlPrimitive primitive = primitive(table, key);
-        if (primitive == null) {
-            return fallback;
-        }
-        try {
-            return primitive.asInteger();
-        } catch (RuntimeException ex) {
-            return fallback;
-        }
+        return (int) longValue(table, key, fallback);
     }
 
     private static long longValue(TomlTable table, String key, long fallback) {

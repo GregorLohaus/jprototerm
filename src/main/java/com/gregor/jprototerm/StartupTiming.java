@@ -22,8 +22,11 @@ final class StartupTiming {
     private StartupTiming() {
     }
 
-    /** Records a phase boundary, printing the delta since the previous mark and since JVM start. */
-    static void mark(String phase) {
+    /**
+     * Records a phase boundary, printing the delta since the previous mark and since JVM start.
+     * Synchronized because marks come from both the launcher thread and the FX thread.
+     */
+    static synchronized void mark(String phase) {
         if (!ENABLED) {
             return;
         }
@@ -38,7 +41,7 @@ final class StartupTiming {
      * Records the first rendered frame exactly once, then becomes a no-op. Safe and cheap to call
      * from the render loop every frame (it only ever touches FX-thread state).
      */
-    static void firstFrame() {
+    static synchronized void firstFrame() {
         if (!ENABLED || firstFrameSeen) {
             return;
         }

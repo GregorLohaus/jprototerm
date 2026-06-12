@@ -317,6 +317,10 @@ public final class LinuxPty implements AutoCloseable {
     }
 
     private void closeMaster() {
+        // Note: closing the master fd does NOT wake a reader thread blocked in read() on it —
+        // the reader unblocks via EOF when the child exits and the slave end closes. The signal
+        // here usually does that; if the child ignores it, the SIGKILL escalation in reap()
+        // guarantees it shortly after.
         callKill(pid, closeSignal);
         callInt(CLOSE, masterFd);
     }

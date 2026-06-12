@@ -18,6 +18,14 @@ import java.util.stream.Stream;
  * return whether they actually changed anything so it can bump its layout version.
  */
 final class Tab implements AutoCloseable {
+    // Floating-pane sizing policy: a fraction of the tab's size with a floor so panes stay
+    // usable in small windows, cascaded diagonally per pane, kept off the window edge.
+    private static final double FLOATING_SIZE_FRACTION = 0.58;
+    private static final double FLOATING_MIN_WIDTH = 420.0;
+    private static final double FLOATING_MIN_HEIGHT = 260.0;
+    private static final double FLOATING_CASCADE_OFFSET = 28.0;
+    private static final double FLOATING_EDGE_MARGIN = 12.0;
+
     private final AppConfig config;
     private final TerminalMetrics metrics;
     // Notified (on the FX thread) when one of this tab's panes' process exits on its own, so the
@@ -142,13 +150,15 @@ final class Tab implements AutoCloseable {
             tiled.get(i).bounds(i * tileWidth, topInset, tileWidth, availHeight);
         }
 
-        double floatingWidth = Math.max(420, width * 0.58);
-        double floatingHeight = Math.max(260, availHeight * 0.58);
+        double floatingWidth = Math.max(FLOATING_MIN_WIDTH, width * FLOATING_SIZE_FRACTION);
+        double floatingHeight = Math.max(FLOATING_MIN_HEIGHT, availHeight * FLOATING_SIZE_FRACTION);
         for (int i = 0; i < floating.size(); i++) {
-            double offset = i * 28.0;
+            double offset = i * FLOATING_CASCADE_OFFSET;
             floating.get(i).bounds(
-                    Math.min(width - floatingWidth - 12.0, ((width - floatingWidth) / 2.0) + offset),
-                    Math.min(height - floatingHeight - 12.0, topInset + ((availHeight - floatingHeight) / 2.0) + offset),
+                    Math.min(width - floatingWidth - FLOATING_EDGE_MARGIN,
+                            ((width - floatingWidth) / 2.0) + offset),
+                    Math.min(height - floatingHeight - FLOATING_EDGE_MARGIN,
+                            topInset + ((availHeight - floatingHeight) / 2.0) + offset),
                     floatingWidth,
                     floatingHeight);
         }
@@ -384,7 +394,9 @@ final class Tab implements AutoCloseable {
     private double[] paneSize(boolean asFloating) {
         double availHeight = lastHeight - lastTopInset;
         if (asFloating) {
-            return new double[] {Math.max(420, lastWidth * 0.58), Math.max(260, availHeight * 0.58)};
+            return new double[] {
+                    Math.max(FLOATING_MIN_WIDTH, lastWidth * FLOATING_SIZE_FRACTION),
+                    Math.max(FLOATING_MIN_HEIGHT, availHeight * FLOATING_SIZE_FRACTION)};
         }
         // A new tiled pane joins the row, so each gets 1/(n+1) of the width.
         return new double[] {lastWidth / (tiled.size() + 1), availHeight};

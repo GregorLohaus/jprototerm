@@ -138,8 +138,7 @@ final class TerminalWindow {
         }
         String encoded = KeyEncoder.encode(event);
         if (encoded != null) {
-            compositor.activePane().send(encoded);
-            event.consume();
+            sendToActivePane(encoded, event);
         }
     }
 
@@ -150,15 +149,25 @@ final class TerminalWindow {
 
         String text = event.getCharacter();
         if (text != null && !text.isEmpty() && text.charAt(0) >= 0x20 && text.charAt(0) != 0x7f) {
-            compositor.activePane().send(text);
+            sendToActivePane(text, event);
+        }
+    }
+
+    // Key handlers run on every keystroke, including any that race the window's teardown, so
+    // tolerate the no-pane-left state instead of assuming one exists.
+    private void sendToActivePane(String text, KeyEvent event) {
+        TerminalPane active = compositor.activePane();
+        if (active != null) {
+            active.send(text);
             event.consume();
         }
     }
 
     private void pasteFromClipboard() {
+        TerminalPane active = compositor.activePane();
         Clipboard clipboard = Clipboard.getSystemClipboard();
-        if (clipboard.hasString()) {
-            compositor.activePane().paste(clipboard.getString());
+        if (active != null && clipboard.hasString()) {
+            active.paste(clipboard.getString());
         }
     }
 
@@ -206,17 +215,22 @@ final class TerminalWindow {
     }
 
     private void openScrollbackInEditor() {
+        // Capture the active pane's scrollback before opening the floating pane, since that
+        // makes the new pane active.
+        TerminalPane active = compositor.activePane();
+        if (active == null) {
+            return;
+        }
         try {
-            // Capture the active pane's scrollback before opening the floating pane, since that
-            // makes the new pane active.
             Path file = Files.createTempFile("jprototerm-scrollback-", ".txt");
-            Files.writeString(file, compositor.activePane().scrollbackText());
-            file.toFile().deleteOnExit();
+            Files.writeString(file, active.scrollbackText());
 
             // Run the editor as the floating pane's process (via /bin/sh -c) rather than typing the
             // command into an interactive shell. The command runs deterministically from the start
-            // — no shell startup/rc race — and the pane auto-closes when the editor exits.
-            compositor.openFloatingPane(scrollbackEditorCommand(file));
+            // — no shell startup/rc race — and the pane auto-closes when the editor exits. The
+            // trailing rm removes the file (which holds terminal contents) when the editor exits;
+            // deleteOnExit would leak files for the JVM's whole lifetime in daemon mode.
+            compositor.openFloatingPane(scrollbackEditorCommand(file) + "; rm -f " + shellQuote(file.toString()));
         } catch (IOException ex) {
             System.err.println("Could not open scrollback in editor: " + ex.getMessage());
         }

@@ -29,6 +29,11 @@ final class GlyphCache {
     record Glyph(int width, int height, byte[] alpha) {
     }
 
+    // Bounds the atlas so pathological glyph diversity (e.g. a dump of distinct CJK/emoji cells)
+    // can't grow it without limit; on overflow it clears and rebuilds on demand, like any
+    // metrics change.
+    private static final int MAX_GLYPHS = 4096;
+
     private final TerminalMetrics metrics;
     private final Map<String, Glyph> glyphs = new HashMap<>();
     // The metrics snapshot the cached glyphs were rasterized for; a mismatch clears the cache.
@@ -43,7 +48,16 @@ final class GlyphCache {
 
     Glyph glyph(String text) {
         ensureCurrent();
-        return glyphs.computeIfAbsent(text, this::renderGlyph);
+        Glyph cached = glyphs.get(text);
+        if (cached != null) {
+            return cached;
+        }
+        if (glyphs.size() >= MAX_GLYPHS) {
+            glyphs.clear();
+        }
+        Glyph rendered = renderGlyph(text);
+        glyphs.put(text, rendered);
+        return rendered;
     }
 
     // Drop the rasterized masks if the font/cell geometry changed since they were built. Cheap to

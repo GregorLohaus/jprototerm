@@ -5,17 +5,19 @@ import javafx.scene.input.KeyEvent;
 
 import java.util.Locale;
 
-public record KeyBinding(boolean alt, boolean control, boolean shift, KeyCode code) {
+public record KeyBinding(boolean alt, boolean control, boolean shift, boolean meta, KeyCode code) {
     public static KeyBinding parse(String value) {
         boolean alt = false;
         boolean control = false;
         boolean shift = false;
+        boolean meta = false;
         KeyCode code = null;
 
         for (String part : value.split("\\+")) {
             String token = part.trim().toUpperCase(Locale.ROOT);
             switch (token) {
-                case "ALT", "META" -> alt = true;
+                case "ALT" -> alt = true;
+                case "META", "SUPER" -> meta = true;
                 case "CTRL", "CONTROL" -> control = true;
                 case "SHIFT" -> shift = true;
                 default -> code = keyCode(token);
@@ -25,13 +27,14 @@ public record KeyBinding(boolean alt, boolean control, boolean shift, KeyCode co
         if (code == null) {
             throw new IllegalArgumentException("Key binding has no key code: " + value);
         }
-        return new KeyBinding(alt, control, shift, code);
+        return new KeyBinding(alt, control, shift, meta, code);
     }
 
     public boolean matches(KeyEvent event) {
         return event.isAltDown() == alt
                 && event.isControlDown() == control
                 && event.isShiftDown() == shift
+                && event.isMetaDown() == meta
                 && event.getCode() == code;
     }
 
@@ -43,6 +46,9 @@ public record KeyBinding(boolean alt, boolean control, boolean shift, KeyCode co
         }
         if (alt) {
             builder.append("ALT+");
+        }
+        if (meta) {
+            builder.append("META+");
         }
         if (shift) {
             builder.append("SHIFT+");

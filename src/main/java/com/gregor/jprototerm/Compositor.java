@@ -114,7 +114,7 @@ public final class Compositor {
     public void setFont(String family, double size) {
         metrics.setFont(family, size);
         paneContentVersion.clear();
-        lastWidth = -1.0; // force a redraw on the next frame
+        layoutVersion++; // recomposite with the new metrics on the next frame
     }
 
     // ---- Tabs and panes -------------------------------------------------------------
@@ -123,8 +123,9 @@ public final class Compositor {
         return tabs.isEmpty();
     }
 
+    /** The active pane of the current tab, or {@code null} when no tab is left. */
     public TerminalPane activePane() {
-        return currentTab().activePane();
+        return isEmpty() ? null : currentTab().activePane();
     }
 
     public void navigate(Direction direction) {
@@ -173,10 +174,7 @@ public final class Compositor {
     }
 
     public void closeActivePane() {
-        if (isEmpty()) {
-            return;
-        }
-        TerminalPane active = currentTab().activePane();
+        TerminalPane active = activePane();
         if (active != null) {
             closePane(active);
         }
@@ -214,7 +212,8 @@ public final class Compositor {
     public void newTab() {
         // Open the new tab in the currently active pane's working directory, so it lands where the
         // user currently is rather than always in home.
-        String workingDirectory = isEmpty() ? null : currentTab().activePane().currentWorkingDirectory();
+        TerminalPane active = activePane();
+        String workingDirectory = active != null ? active.currentWorkingDirectory() : null;
         tabs.add(new Tab(config, metrics, workingDirectory, this::closePane));
         currentTabIndex = tabs.size() - 1;
         layoutVersion++;
@@ -454,11 +453,11 @@ public final class Compositor {
     private void handleMouseReleased(MouseEvent event) {
         TerminalPane pane = paneAt(event.getX(), event.getY());
         if (pane == null) {
-            pane = activePane();
+            pane = activePane(); // released outside every pane (e.g. mid-drag): route to the active one
         }
 
         MouseButton button = pressedButton == MouseButton.UNKNOWN ? mouseButton(event) : pressedButton;
-        MouseTarget target = mouseTarget(pane);
+        MouseTarget target = pane == null ? null : mouseTarget(pane);
         if (target != null) {
             send(pane, target, MouseInput.release(button, localX(event.getX(), pane, target), localY(event.getY(), pane, target), modifiers(event)), false, event);
         }
@@ -469,7 +468,10 @@ public final class Compositor {
     private void handleMouseDragged(MouseEvent event) {
         TerminalPane pane = paneAt(event.getX(), event.getY());
         if (pane == null) {
-            pane = activePane();
+            pane = activePane(); // dragged outside every pane: route to the active one
+        }
+        if (pane == null) {
+            return;
         }
 
         MouseButton button = pressedButton == MouseButton.UNKNOWN ? mouseButton(event) : pressedButton;

@@ -18,6 +18,7 @@ import javafx.scene.shape.Shape;
 
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 /**
  * One terminal: owns its ghostty {@link Terminal}, the {@link ShellSession}/pty driving it,
@@ -80,8 +81,8 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
     public static TerminalPane create(AppConfig config, TerminalMetrics metrics, Runnable onContentChange,
             double widthPx, double heightPx, String workingDirectory) {
         TerminalPane pane = newPane(config, metrics, onContentChange, widthPx, heightPx);
-        pane.attach(ShellSession.start(config.shell(), config.envOverride(), pane, pane.columns, pane.rows,
-                workingDirectory, config.closeSignalNumber()));
+        attachOrShowError(pane, () -> ShellSession.start(config.shell(), config.envOverride(), pane,
+                pane.columns, pane.rows, workingDirectory, config.closeSignalNumber()));
         return pane;
     }
 
@@ -93,9 +94,21 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
     public static TerminalPane createWithCommand(AppConfig config, TerminalMetrics metrics, Runnable onContentChange,
             double widthPx, double heightPx, String workingDirectory, String command) {
         TerminalPane pane = newPane(config, metrics, onContentChange, widthPx, heightPx);
-        pane.attach(ShellSession.startCommand(config.envOverride(), pane, pane.columns, pane.rows,
-                workingDirectory, command, config.closeSignalNumber()));
+        attachOrShowError(pane, () -> ShellSession.startCommand(config.envOverride(), pane,
+                pane.columns, pane.rows, workingDirectory, command, config.closeSignalNumber()));
         return pane;
+    }
+
+    // Start the pane's process, but never let a spawn failure (e.g. a bad `shell` in config)
+    // propagate and crash window/pane creation. ShellSession has already written the error into
+    // the pane, so the pane opens showing it; with no session attached it is inert (sends are
+    // dropped) and the user closes it with the close-pane key.
+    private static void attachOrShowError(TerminalPane pane, Supplier<ShellSession> start) {
+        try {
+            pane.attach(start.get());
+        } catch (RuntimeException ex) {
+            System.err.println("jprototerm: " + ex.getMessage());
+        }
     }
 
     private static TerminalPane newPane(AppConfig config, TerminalMetrics metrics, Runnable onContentChange,

@@ -9,6 +9,7 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 
@@ -23,6 +24,11 @@ import java.nio.file.attribute.PosixFilePermissions;
  * (mode 0700), so only the owning user can connect.
  */
 public final class Daemon {
+    // One request is a single line holding a filesystem path; anything bigger is bogus.
+    private static final int MAX_REQUEST_BYTES = 4096;
+    // The accept loop is single-threaded, so a client that stalls must not wedge the daemon.
+    private static final long READ_TIMEOUT_NANOS = 5_000_000_000L;
+
     private Daemon() {
     }
 
@@ -31,9 +37,9 @@ public final class Daemon {
         Path socket = socketPath();
         try {
             Files.createDirectories(socket.getParent());
-            trySecureDir(socket.getParent());
+            secureDir(socket.getParent());
         } catch (IOException ex) {
-            System.err.println("jprototerm: cannot create socket dir " + socket.getParent() + ": " + ex.getMessage());
+            System.err.println("jprototerm: cannot secure socket dir " + socket.getParent() + ": " + ex.getMessage());
             return;
         }
 
@@ -107,25 +113,48 @@ public final class Daemon {
             manager.openWindow(workingDirectory == null || workingDirectory.isBlank()
                     ? null
                     : workingDirectory.trim());
+            connection.configureBlocking(true);
             connection.write(ByteBuffer.wrap("OK\n".getBytes(StandardCharsets.UTF_8)));
         }
     }
 
+    // Reads the request line non-blocking with a deadline and a size cap: the accept loop is
+    // single-threaded, so a client that stalls or never sends a newline must fail the connection
+    // (an IOException logged by run()) rather than wedge the daemon or grow the buffer unbounded.
     private static String readLine(SocketChannel channel) throws IOException {
+        channel.configureBlocking(false);
+        long deadline = System.nanoTime() + READ_TIMEOUT_NANOS;
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ByteBuffer buffer = ByteBuffer.allocate(4096);
-        while (channel.read(buffer) != -1) {
-            buffer.flip();
-            while (buffer.hasRemaining()) {
-                byte b = buffer.get();
-                if (b == '\n') {
-                    return out.toString(StandardCharsets.UTF_8);
+        while (true) {
+            int n = channel.read(buffer);
+            if (n > 0) {
+                buffer.flip();
+                while (buffer.hasRemaining()) {
+                    byte b = buffer.get();
+                    if (b == '\n') {
+                        return out.toString(StandardCharsets.UTF_8);
+                    }
+                    out.write(b);
+                    if (out.size() > MAX_REQUEST_BYTES) {
+                        throw new IOException("request line too long");
+                    }
                 }
-                out.write(b);
+                buffer.clear();
+            } else if (n == -1) {
+                return out.size() == 0 ? null : out.toString(StandardCharsets.UTF_8);
+            } else {
+                if (System.nanoTime() >= deadline) {
+                    throw new IOException("request timed out");
+                }
+                try {
+                    Thread.sleep(5);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("interrupted while reading request");
+                }
             }
-            buffer.clear();
         }
-        return out.size() == 0 ? null : out.toString(StandardCharsets.UTF_8);
     }
 
     private static Path socketPath() {
@@ -136,11 +165,19 @@ public final class Daemon {
         return dir.resolve("daemon.sock");
     }
 
-    private static void trySecureDir(Path dir) {
+    // Make the socket dir private, and refuse to use it if it is not ours. The /tmp fallback
+    // path is predictable, so another user could have pre-created it (the classic /tmp race);
+    // binding a socket inside a directory someone else owns would hand them control of it.
+    private static void secureDir(Path dir) throws IOException {
         try {
             Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
-        } catch (IOException | UnsupportedOperationException ignored) {
-            // Best effort: XDG_RUNTIME_DIR is already user-private; the /tmp fallback we try to lock.
+        } catch (UnsupportedOperationException ignored) {
+            return; // not a POSIX filesystem: nothing more we can check
+        }
+        String owner = Files.getOwner(dir, LinkOption.NOFOLLOW_LINKS).getName();
+        String user = System.getProperty("user.name");
+        if (!owner.equals(user)) {
+            throw new IOException(dir + " is owned by '" + owner + "', not '" + user + "'");
         }
     }
 }

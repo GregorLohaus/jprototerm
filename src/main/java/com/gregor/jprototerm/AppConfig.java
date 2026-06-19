@@ -105,7 +105,7 @@ public record AppConfig(
                 defaultScrollbackEditorCommand(),
                 "./.worktrees",
                 ",",
-                "",
+                "none",
                 "SIGTERM",
                 Map.of(),
                 Map.ofEntries(

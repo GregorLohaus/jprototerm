@@ -375,6 +375,7 @@ final class TerminalWindow {
         }
 
         switch (action.trim().toLowerCase(Locale.ROOT)) {
+            case "none" -> { }
             case "cd" -> lastActivePane.send("cd " + shellQuote(worktreePaths.get(worktreePaths.size() - 1)) + "\r");
             case "create_panes" -> worktreePaths.forEach(compositor::createTiledPane);
             case "create_panes_floating" -> worktreePaths.forEach(compositor::createFloatingPaneInDirectory);

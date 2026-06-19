@@ -22,8 +22,8 @@ editor_command = "vi {file}"
 [worktree]
 relative_worktree_path = "./.worktrees"
 split_regex = ","
-# One of: "", "cd", "create_panes", "create_panes_floating".
-post_create_action = ""
+# One of: "none", "cd", "create_panes", "create_panes_floating".
+post_create_action = "none"
 
 [env.override]
 ZELLIJ_SESSION_NAME = ""

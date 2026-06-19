@@ -78,6 +78,9 @@ After that, a bare `jprototerm` connects to the daemon and opens a window in the
 directory. If no daemon is running, `jprototerm` falls back to a standalone in-process window
 (today's behavior), so it always works.
 
+For development testing, use `jprototerm --standalone` to skip the daemon even when one is
+running.
+
 To start the daemon automatically with your graphical session, enable the bundled **user**
 service (it's a user service, not a system one, because X11 needs a display — which only
 exists after you log in):

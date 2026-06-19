@@ -146,6 +146,9 @@ enabled = true
 [scrollback]
 editor_command = "vi {file}"
 
+[worktree]
+relative_worktree_path = "./.worktrees"
+
 [env.override]
 ZELLIJ_SESSION_NAME = ""
 
@@ -163,6 +166,7 @@ previous_tab = "ALT+SHIFT+H"
 next_tab = "ALT+SHIFT+L"
 open_font_selector = "ALT+T"
 open_scrollback = "ALT+S"
+open_worktree = "ALT+W"
 ```
 
 ## Defaults
@@ -178,6 +182,8 @@ open_scrollback = "ALT+S"
 - `Alt+Shift+h` / `Alt+Shift+l`: previous / next tab
 - `Alt+t`: open the font selector
 - `Alt+s`: open the active pane scrollback in `$EDITOR`
+- `Alt+w`: edit a worktree name, then run `git worktree add <relative_worktree_path>/<name>`
+  from the previously focused pane's working directory
 - Font default: `JetBrainsMono Nerd Font`
 - Kitty graphics protocol parsing is enabled by default
 

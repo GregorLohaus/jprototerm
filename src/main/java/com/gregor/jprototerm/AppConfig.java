@@ -50,10 +50,9 @@ public record AppConfig(
             "open_font_selector",
             "open_scrollback",
             "create_worktree",
-            "pane_sync_start",
+            "pane_sync_toggle",
             "pane_sync_select",
             "pane_sync_commit",
-            "pane_sync_end",
             "paste"
     );
 
@@ -120,10 +119,9 @@ public record AppConfig(
                         Map.entry("open_font_selector", KeyBinding.parse("ALT+T")),
                         Map.entry("open_scrollback", KeyBinding.parse("ALT+S")),
                         Map.entry("create_worktree", KeyBinding.parse("ALT+W")),
-                        Map.entry("pane_sync_start", KeyBinding.parse("ALT+Y")),
+                        Map.entry("pane_sync_toggle", KeyBinding.parse("ALT+Y")),
                         Map.entry("pane_sync_select", KeyBinding.parse("SPACE")),
                         Map.entry("pane_sync_commit", KeyBinding.parse("ALT+SHIFT+Y")),
-                        Map.entry("pane_sync_end", KeyBinding.parse("ALT+U")),
                         Map.entry("paste", KeyBinding.parse("CTRL+SHIFT+V"))
                 )
         );

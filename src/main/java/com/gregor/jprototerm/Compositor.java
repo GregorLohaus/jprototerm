@@ -144,8 +144,15 @@ public final class Compositor {
         return paneSyncSelectMode;
     }
 
-    public void startPaneSyncSelection() {
-        if (activePane() == null || paneSyncSelectMode) {
+    public void togglePaneSync() {
+        if (paneSyncSelectMode || !paneSyncPanes.isEmpty()) {
+            paneSyncSelectMode = false;
+            paneSyncSelection.clear();
+            paneSyncPanes.clear();
+            layoutVersion++;
+            return;
+        }
+        if (activePane() == null) {
             return;
         }
         paneSyncSelectMode = true;
@@ -173,16 +180,6 @@ public final class Compositor {
         paneSyncSelection.clear();
         paneSyncSelectMode = false;
         prunePaneSyncState();
-        layoutVersion++;
-    }
-
-    public void endPaneSync() {
-        if (!paneSyncSelectMode && paneSyncSelection.isEmpty() && paneSyncPanes.isEmpty()) {
-            return;
-        }
-        paneSyncSelectMode = false;
-        paneSyncSelection.clear();
-        paneSyncPanes.clear();
         layoutVersion++;
     }
 

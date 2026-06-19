@@ -72,10 +72,9 @@ final class TerminalWindow {
         keyActions.put("open_font_selector", this::openFontSelector);
         keyActions.put("open_scrollback", this::openScrollbackInEditor);
         keyActions.put("create_worktree", this::createWorktreeInEditor);
-        keyActions.put("pane_sync_start", compositor::startPaneSyncSelection);
+        keyActions.put("pane_sync_toggle", compositor::togglePaneSync);
         keyActions.put("pane_sync_select", compositor::togglePaneSyncSelection);
         keyActions.put("pane_sync_commit", compositor::commitPaneSyncSelection);
-        keyActions.put("pane_sync_end", compositor::endPaneSync);
         keyActions.put("paste", this::pasteFromClipboard);
 
         StackPane root = new StackPane(compositor.canvas(), compositor.imageOverlay());
@@ -169,9 +168,9 @@ final class TerminalWindow {
                     "next_floating",
                     "previous_tab",
                     "next_tab",
+                    "pane_sync_toggle",
                     "pane_sync_select",
-                    "pane_sync_commit",
-                    "pane_sync_end" -> true;
+                    "pane_sync_commit" -> true;
             default -> false;
         };
     }

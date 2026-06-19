@@ -72,6 +72,9 @@ final class TerminalWindow {
         keyActions.put("open_font_selector", this::openFontSelector);
         keyActions.put("open_scrollback", this::openScrollbackInEditor);
         keyActions.put("create_worktree", this::createWorktreeInEditor);
+        keyActions.put("pane_sync_select", compositor::togglePaneSyncSelection);
+        keyActions.put("pane_sync_commit", compositor::commitPaneSyncSelection);
+        keyActions.put("pane_sync_end", compositor::endPaneSync);
         keyActions.put("paste", this::pasteFromClipboard);
 
         StackPane root = new StackPane(compositor.canvas(), compositor.imageOverlay());
@@ -132,10 +135,18 @@ final class TerminalWindow {
     private void handlePressed(KeyEvent event) {
         for (Map.Entry<String, Runnable> action : keyActions.entrySet()) {
             if (config.keybindings().get(action.getKey()).matches(event)) {
+                if (compositor.isPaneSyncSelecting() && !allowedDuringPaneSyncSelection(action.getKey())) {
+                    event.consume();
+                    return;
+                }
                 action.getValue().run();
                 event.consume();
                 return;
             }
+        }
+        if (compositor.isPaneSyncSelecting()) {
+            event.consume();
+            return;
         }
         String encoded = KeyEncoder.encode(event);
         if (encoded != null) {
@@ -143,7 +154,28 @@ final class TerminalWindow {
         }
     }
 
+    private static boolean allowedDuringPaneSyncSelection(String action) {
+        return switch (action) {
+            case "navigate_left",
+                    "navigate_down",
+                    "navigate_up",
+                    "navigate_right",
+                    "toggle_floating",
+                    "next_floating",
+                    "previous_tab",
+                    "next_tab",
+                    "pane_sync_select",
+                    "pane_sync_commit",
+                    "pane_sync_end" -> true;
+            default -> false;
+        };
+    }
+
     private void handleTyped(KeyEvent event) {
+        if (compositor.isPaneSyncSelecting()) {
+            event.consume();
+            return;
+        }
         if (event.isAltDown() || event.isControlDown() || event.isMetaDown()) {
             return;
         }
@@ -160,6 +192,9 @@ final class TerminalWindow {
         TerminalPane active = compositor.activePane();
         if (active != null) {
             active.send(text);
+            for (TerminalPane peer : compositor.paneSyncPeers(active)) {
+                peer.send(text);
+            }
             event.consume();
         }
     }
@@ -168,7 +203,11 @@ final class TerminalWindow {
         TerminalPane active = compositor.activePane();
         Clipboard clipboard = Clipboard.getSystemClipboard();
         if (active != null && clipboard.hasString()) {
-            active.paste(clipboard.getString());
+            String text = clipboard.getString();
+            active.paste(text);
+            for (TerminalPane peer : compositor.paneSyncPeers(active)) {
+                peer.paste(text);
+            }
         }
     }
 

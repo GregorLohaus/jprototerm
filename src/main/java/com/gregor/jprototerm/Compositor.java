@@ -20,6 +20,7 @@ import javafx.scene.text.TextAlignment;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -37,6 +38,8 @@ public final class Compositor {
     // Canvas background shown wherever no pane covers (gaps). Painted on a full recomposite.
     private static final Color GAP_BACKGROUND = Color.rgb(16, 16, 18);
     private static final Color TAB_TEXT = Color.rgb(225, 229, 235);
+    private static final Color PANE_SYNC_SELECT_BORDER = Color.rgb(255, 183, 77);
+    private static final Color PANE_SYNC_COMMITTED_BORDER = Color.rgb(105, 214, 128);
     // Thin tab strip shown at the top when more than one tab is open.
     private static final double TAB_BAR_HEIGHT = 22.0;
 
@@ -62,6 +65,9 @@ public final class Compositor {
     private final Map<TerminalPane, Long> hiddenSince = new HashMap<>();
     // Panes whose backbuffer is currently released, so we don't release again every frame.
     private final Set<TerminalPane> released = new HashSet<>();
+    private final Set<TerminalPane> paneSyncSelection = new LinkedHashSet<>();
+    private final Set<TerminalPane> paneSyncPanes = new LinkedHashSet<>();
+    private boolean paneSyncSelectMode;
     // layoutVersion at the last sweep: lets an idle, all-released steady state skip the scan.
     private long lastSweepLayoutVersion = Long.MIN_VALUE;
     // Cheap per-frame dirty signal: skip the whole render when none of these changed.
@@ -134,6 +140,57 @@ public final class Compositor {
         }
     }
 
+    public boolean isPaneSyncSelecting() {
+        return paneSyncSelectMode;
+    }
+
+    public void togglePaneSyncSelection() {
+        TerminalPane active = activePane();
+        if (active == null) {
+            return;
+        }
+        if (!paneSyncSelectMode) {
+            paneSyncSelectMode = true;
+            paneSyncSelection.clear();
+        }
+        if (!paneSyncSelection.add(active)) {
+            paneSyncSelection.remove(active);
+        }
+        layoutVersion++;
+    }
+
+    public void commitPaneSyncSelection() {
+        if (!paneSyncSelectMode) {
+            return;
+        }
+        paneSyncPanes.clear();
+        paneSyncPanes.addAll(paneSyncSelection);
+        paneSyncSelection.clear();
+        paneSyncSelectMode = false;
+        prunePaneSyncState();
+        layoutVersion++;
+    }
+
+    public void endPaneSync() {
+        if (!paneSyncSelectMode && paneSyncSelection.isEmpty() && paneSyncPanes.isEmpty()) {
+            return;
+        }
+        paneSyncSelectMode = false;
+        paneSyncSelection.clear();
+        paneSyncPanes.clear();
+        layoutVersion++;
+    }
+
+    public List<TerminalPane> paneSyncPeers(TerminalPane source) {
+        prunePaneSyncState();
+        if (source == null || !paneSyncPanes.contains(source)) {
+            return List.of();
+        }
+        return paneSyncPanes.stream()
+                .filter(pane -> pane != source)
+                .toList();
+    }
+
     public void toggleFloating() {
         mutateCurrentTab(() -> currentTab().toggleFloating());
     }
@@ -190,6 +247,7 @@ public final class Compositor {
         for (int i = 0; i < tabs.size(); i++) {
             Tab tab = tabs.get(i);
             if (tab.closePane(pane)) {
+                removePaneFromSyncState(pane);
                 if (tab.isEmpty()) {
                     // Closing a tab's last pane closes the tab. Keep currentTabIndex pointing at the
                     // same tab (or clamp it when the current/last tab went away).
@@ -238,6 +296,9 @@ public final class Compositor {
             tab.close();
         }
         tabs.clear();
+        paneSyncSelectMode = false;
+        paneSyncSelection.clear();
+        paneSyncPanes.clear();
     }
 
     /**
@@ -377,6 +438,7 @@ public final class Compositor {
         for (TerminalPane pane : panes) {
             paneContentVersion.put(pane, pane.paintFull(gc, isActive(pane)));
         }
+        drawPaneSyncOverlay(gc, panes);
         imageOverlay.sync(panes);
     }
 
@@ -396,6 +458,7 @@ public final class Compositor {
             paneContentVersion.put(pane, pane.paintIncremental(gc, isActive(pane)));
             imageOverlay.updatePane(pane);
         }
+        drawPaneSyncOverlay(gc, panes);
     }
 
     private GraphicsContext beginFrame() {
@@ -429,6 +492,63 @@ public final class Compositor {
         gc.setTextAlign(TextAlignment.LEFT);
         gc.setTextBaseline(VPos.BASELINE);
         gc.setFontSmoothingType(FontSmoothingType.LCD);
+    }
+
+    private void drawPaneSyncOverlay(GraphicsContext gc, List<TerminalPane> panes) {
+        Set<TerminalPane> highlighted = paneSyncSelectMode ? paneSyncSelection : paneSyncPanes;
+        if (highlighted.isEmpty()) {
+            return;
+        }
+
+        gc.save();
+        try {
+            gc.setLineWidth(4.0);
+            gc.setStroke(paneSyncSelectMode ? PANE_SYNC_SELECT_BORDER : PANE_SYNC_COMMITTED_BORDER);
+            for (TerminalPane pane : panes) {
+                if (!highlighted.contains(pane)) {
+                    continue;
+                }
+                gc.save();
+                double x = Math.round(pane.x()) + 2.0;
+                double y = Math.round(pane.y()) + 2.0;
+                double width = Math.max(0.0, pane.width() - 4.0);
+                double height = Math.max(0.0, pane.height() - 4.0);
+                TerminalRenderer.clip(gc, Math.round(pane.x()), Math.round(pane.y()), pane.width(), pane.height(), pane.clip());
+                gc.strokeRect(x, y, width, height);
+                gc.restore();
+            }
+        } finally {
+            gc.restore();
+        }
+    }
+
+    private void removePaneFromSyncState(TerminalPane pane) {
+        boolean changed = paneSyncSelection.remove(pane);
+        changed |= paneSyncPanes.remove(pane);
+        if (paneSyncPanes.size() < 2) {
+            changed |= !paneSyncPanes.isEmpty();
+            paneSyncPanes.clear();
+        }
+        if (changed) {
+            layoutVersion++;
+        }
+    }
+
+    private void prunePaneSyncState() {
+        Set<TerminalPane> live = livePanes();
+        paneSyncSelection.retainAll(live);
+        paneSyncPanes.retainAll(live);
+        if (paneSyncPanes.size() < 2) {
+            paneSyncPanes.clear();
+        }
+    }
+
+    private Set<TerminalPane> livePanes() {
+        Set<TerminalPane> live = new HashSet<>();
+        for (Tab tab : tabs) {
+            live.addAll(tab.allPanes());
+        }
+        return live;
     }
 
     // ---- Input ----------------------------------------------------------------------

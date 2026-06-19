@@ -20,8 +20,10 @@ import javafx.stage.Stage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -287,9 +289,15 @@ final class TerminalWindow {
         }
         try {
             Path file = Files.createTempFile("jprototerm-worktree-", ".txt");
+            Path createdFile = Files.createTempFile("jprototerm-worktree-created-", ".txt");
             Files.writeString(file, "");
 
-            compositor.openFloatingPane(worktreeEditorCommand(file));
+            TerminalPane commandPane = compositor.openFloatingPane(worktreeEditorCommand(file, createdFile));
+            if (commandPane != null) {
+                commandPane.addOnExit(() -> runPostWorktreeAction(active, createdFile));
+            } else {
+                Files.deleteIfExists(createdFile);
+            }
         } catch (IOException ex) {
             System.err.println("Could not create worktree from editor input: " + ex.getMessage());
         }
@@ -307,23 +315,110 @@ final class TerminalWindow {
         return command + " " + quotedFile;
     }
 
-    private String worktreeEditorCommand(Path file) {
+    private String worktreeEditorCommand(Path file, Path createdFile) {
         String quotedFile = shellQuote(file.toString());
+        String quotedCreatedFile = shellQuote(createdFile.toString());
         String relativePath = config.worktreeRelativePath();
         if (relativePath == null || relativePath.isBlank()) {
             relativePath = "./.worktrees";
         }
+        String splitRegex = config.worktreeSplitRegex();
+        if (splitRegex == null || splitRegex.isBlank()) {
+            splitRegex = ",";
+        }
 
         return editorCommand(file)
                 + "; editor_status=$?"
-                + "; name=$(cat " + quotedFile + ")"
-                + "; if [ \"$editor_status\" -eq 0 ] && [ -n \"$name\" ]; then"
-                + " git worktree add " + shellQuote(relativePath) + "/\"$name\""
-                + "; git_status=$?"
-                + "; else git_status=$editor_status"
+                + "; git_status=$editor_status"
+                + "; if [ \"$editor_status\" -eq 0 ]; then"
+                + " if names_file=$(mktemp); then"
+                + " if awk -v re=" + shellQuote(splitRegex)
+                + " '{ text = text $0 \"\\n\" }"
+                + " END { n = split(text, names, re); for (i = 1; i <= n; i++)"
+                + " { name = names[i]; sub(/^[[:space:]]+/, \"\", name);"
+                + " sub(/[[:space:]]+$/, \"\", name); if (name != \"\") print name; } }'"
+                + " " + quotedFile + " > \"$names_file\"; then"
+                + " git_status=0"
+                + "; while IFS= read -r name; do"
+                + " worktree_path=" + shellQuote(relativePath) + "/\"$name\""
+                + "; git worktree add \"$worktree_path\""
+                + " || { git_status=$?; break; }"
+                + "; created_path=$(cd \"$worktree_path\" && pwd -P)"
+                + " || { git_status=$?; break; }"
+                + "; printf '%s\\n' \"$created_path\" >> " + quotedCreatedFile
+                + " || { git_status=$?; break; }"
+                + "; done < \"$names_file\""
+                + "; else git_status=$?"
+                + "; fi"
+                + "; rm -f \"$names_file\""
+                + "; else git_status=$?"
+                + "; fi"
                 + "; fi"
                 + "; rm -f " + quotedFile
                 + "; exit \"$git_status\"";
+    }
+
+    private void runPostWorktreeAction(TerminalPane lastActivePane, Path createdFile) {
+        List<String> worktreePaths = readCreatedWorktreePaths(createdFile);
+        try {
+            Files.deleteIfExists(createdFile);
+        } catch (IOException ex) {
+            System.err.println("Could not remove worktree result file " + createdFile + ": " + ex.getMessage());
+        }
+        if (worktreePaths.isEmpty()) {
+            return;
+        }
+
+        String action = config.worktreePostCreateAction();
+        if (action == null || action.isBlank()) {
+            return;
+        }
+
+        switch (action.trim().toLowerCase(Locale.ROOT)) {
+            case "none" -> { }
+            case "cd" -> lastActivePane.send("cd " + shellQuote(worktreePaths.get(worktreePaths.size() - 1)) + "\r");
+            case "create_panes" -> createWorktreePanes(worktreePaths, false);
+            case "create_panes_floating" -> createWorktreePanes(worktreePaths, true);
+            default -> System.err.println("Unknown worktree.post_create_action '" + action + "'");
+        }
+    }
+
+    private void createWorktreePanes(List<String> worktreePaths, boolean floating) {
+        List<String> commands = config.worktreeCommands();
+        List<TerminalPane> createdPanes = new ArrayList<>();
+        for (int i = 0; i < worktreePaths.size(); i++) {
+            TerminalPane pane = floating
+                    ? compositor.createFloatingPaneInDirectory(worktreePaths.get(i))
+                    : compositor.createTiledPane(worktreePaths.get(i));
+            if (pane != null) {
+                createdPanes.add(pane);
+            }
+            if (pane != null && !commands.isEmpty()) {
+                String command = commands.get(i % commands.size());
+                if (command != null && !command.isBlank()) {
+                    pane.send(command + "\r");
+                }
+            }
+        }
+        if (config.worktreeSyncPanes() && !createdPanes.isEmpty()) {
+            compositor.syncPanes(createdPanes);
+        }
+    }
+
+    private List<String> readCreatedWorktreePaths(Path createdFile) {
+        try {
+            List<String> paths = new ArrayList<>();
+            for (String line : Files.readAllLines(createdFile)) {
+                String path = line.trim();
+                if (!path.isEmpty()) {
+                    paths.add(path);
+                }
+            }
+            return paths;
+        } catch (IOException ex) {
+            System.err.println("Could not read created worktree paths from " + createdFile + ": " + ex.getMessage());
+            return List.of();
+        }
     }
 
     private static String shellQuote(String value) {

@@ -188,12 +188,43 @@ public final class Compositor {
                 .toList();
     }
 
+    public void syncPanes(List<TerminalPane> panes) {
+        paneSyncSelectMode = false;
+        paneSyncSelection.clear();
+        paneSyncPanes.clear();
+        for (TerminalPane pane : panes) {
+            if (pane != null) {
+                paneSyncPanes.add(pane);
+            }
+        }
+        prunePaneSyncState();
+        layoutVersion++;
+    }
+
     public void toggleFloating() {
         mutateCurrentTab(() -> currentTab().toggleFloating());
     }
 
     public void createPane() {
         mutateCurrentTab(() -> currentTab().createPane());
+    }
+
+    public TerminalPane createTiledPane(String workingDirectory) {
+        if (isEmpty()) {
+            return null;
+        }
+        TerminalPane pane = currentTab().createTiledPane(workingDirectory);
+        layoutVersion++;
+        return pane;
+    }
+
+    public TerminalPane createFloatingPaneInDirectory(String workingDirectory) {
+        if (isEmpty()) {
+            return null;
+        }
+        TerminalPane pane = currentTab().createFloatingPaneInDirectory(workingDirectory);
+        layoutVersion++;
+        return pane;
     }
 
     /**

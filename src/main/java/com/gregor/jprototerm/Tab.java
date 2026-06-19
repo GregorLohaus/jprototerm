@@ -237,10 +237,19 @@ final class Tab implements AutoCloseable {
         if (floatingVisible) {
             createFloatingPane();
         } else {
-            TerminalPane pane = openPane(false);
-            tiled.add(pane);
-            setActive(pane);
+            createTiledPane(paneWorkingDirectory());
         }
+    }
+
+    TerminalPane createTiledPane(String workingDirectory) {
+        TerminalPane pane = openPane(false, workingDirectory);
+        tiled.add(pane);
+        setActive(pane);
+        return pane;
+    }
+
+    TerminalPane createFloatingPaneInDirectory(String workingDirectory) {
+        return addFloating(openPane(true, workingDirectory));
     }
 
     void nextFloatingPane() {
@@ -334,7 +343,7 @@ final class Tab implements AutoCloseable {
     }
 
     private void createFloatingPane() {
-        addFloating(openPane(true));
+        addFloating(openPane(true, paneWorkingDirectory()));
     }
 
     /**
@@ -386,9 +395,13 @@ final class Tab implements AutoCloseable {
     }
 
     private TerminalPane openPane(boolean asFloating) {
+        return openPane(asFloating, paneWorkingDirectory());
+    }
+
+    private TerminalPane openPane(boolean asFloating, String workingDirectory) {
         double[] size = paneSize(asFloating);
         return register(TerminalPane.create(
-                config, metrics, this::markContentChanged, size[0], size[1], paneWorkingDirectory()));
+                config, metrics, this::markContentChanged, size[0], size[1], workingDirectory));
     }
 
     private double[] paneSize(boolean asFloating) {

@@ -154,6 +154,7 @@ relative_worktree_path = "./.worktrees"
 split_regex = ","
 # One of: "none", "cd", "create_panes", "create_panes_floating".
 post_create_action = "none"
+commands = []
 
 [env.override]
 ZELLIJ_SESSION_NAME = ""
@@ -196,6 +197,8 @@ paste = "CTRL+SHIFT+V"
   pane's working directory. `worktree.post_create_action` can then do nothing with `none`, `cd` the
   previously active pane to the last created worktree, create one tiled pane per worktree with
   `create_panes`, or create one floating pane per worktree with `create_panes_floating`.
+  `worktree.commands`, for example `["npm install", "git status"]`, can run commands in created
+  panes; commands are assigned in order and repeat when fewer commands than panes are created.
 - `Alt+y`: enter pane-sync selection mode, commit the selection, or stop an active pane sync
 - `Space`: toggle the focused pane in the sync set while pane-sync selection mode is active
 - Once committed, input typed or pasted into any synced pane is mirrored to the other synced panes

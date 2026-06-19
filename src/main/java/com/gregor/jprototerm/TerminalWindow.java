@@ -377,9 +377,24 @@ final class TerminalWindow {
         switch (action.trim().toLowerCase(Locale.ROOT)) {
             case "none" -> { }
             case "cd" -> lastActivePane.send("cd " + shellQuote(worktreePaths.get(worktreePaths.size() - 1)) + "\r");
-            case "create_panes" -> worktreePaths.forEach(compositor::createTiledPane);
-            case "create_panes_floating" -> worktreePaths.forEach(compositor::createFloatingPaneInDirectory);
+            case "create_panes" -> createWorktreePanes(worktreePaths, false);
+            case "create_panes_floating" -> createWorktreePanes(worktreePaths, true);
             default -> System.err.println("Unknown worktree.post_create_action '" + action + "'");
+        }
+    }
+
+    private void createWorktreePanes(List<String> worktreePaths, boolean floating) {
+        List<String> commands = config.worktreeCommands();
+        for (int i = 0; i < worktreePaths.size(); i++) {
+            TerminalPane pane = floating
+                    ? compositor.createFloatingPaneInDirectory(worktreePaths.get(i))
+                    : compositor.createTiledPane(worktreePaths.get(i));
+            if (pane != null && !commands.isEmpty()) {
+                String command = commands.get(i % commands.size());
+                if (command != null && !command.isBlank()) {
+                    pane.send(command + "\r");
+                }
+            }
         }
     }
 

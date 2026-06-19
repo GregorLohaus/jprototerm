@@ -241,14 +241,15 @@ final class Tab implements AutoCloseable {
         }
     }
 
-    void createTiledPane(String workingDirectory) {
+    TerminalPane createTiledPane(String workingDirectory) {
         TerminalPane pane = openPane(false, workingDirectory);
         tiled.add(pane);
         setActive(pane);
+        return pane;
     }
 
-    void createFloatingPaneInDirectory(String workingDirectory) {
-        addFloating(openPane(true, workingDirectory));
+    TerminalPane createFloatingPaneInDirectory(String workingDirectory) {
+        return addFloating(openPane(true, workingDirectory));
     }
 
     void nextFloatingPane() {

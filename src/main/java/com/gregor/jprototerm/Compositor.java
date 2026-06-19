@@ -196,12 +196,22 @@ public final class Compositor {
         mutateCurrentTab(() -> currentTab().createPane());
     }
 
-    public void createTiledPane(String workingDirectory) {
-        mutateCurrentTab(() -> currentTab().createTiledPane(workingDirectory));
+    public TerminalPane createTiledPane(String workingDirectory) {
+        if (isEmpty()) {
+            return null;
+        }
+        TerminalPane pane = currentTab().createTiledPane(workingDirectory);
+        layoutVersion++;
+        return pane;
     }
 
-    public void createFloatingPaneInDirectory(String workingDirectory) {
-        mutateCurrentTab(() -> currentTab().createFloatingPaneInDirectory(workingDirectory));
+    public TerminalPane createFloatingPaneInDirectory(String workingDirectory) {
+        if (isEmpty()) {
+            return null;
+        }
+        TerminalPane pane = currentTab().createFloatingPaneInDirectory(workingDirectory);
+        layoutVersion++;
+        return pane;
     }
 
     /**

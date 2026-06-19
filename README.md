@@ -170,6 +170,9 @@ next_tab = "ALT+SHIFT+L"
 open_font_selector = "ALT+T"
 open_scrollback = "ALT+S"
 create_worktree = "ALT+W"
+pane_sync_toggle = "ALT+Y"
+pane_sync_select = "SPACE"
+paste = "CTRL+SHIFT+V"
 ```
 
 ## Defaults
@@ -187,6 +190,10 @@ create_worktree = "ALT+W"
 - `Alt+s`: open the active pane scrollback in `$EDITOR`
 - `Alt+w`: edit a worktree name, then run `git worktree add <relative_worktree_path>/<name>`
   from the previously focused pane's working directory
+- `Alt+y`: enter pane-sync selection mode, commit the selection, or stop an active pane sync
+- `Space`: toggle the focused pane in the sync set while pane-sync selection mode is active
+- Once committed, input typed or pasted into any synced pane is mirrored to the other synced panes
+- `Ctrl+Shift+v`: paste
 - Font default: `JetBrainsMono Nerd Font`
 - Kitty graphics protocol parsing is enabled by default
 

@@ -196,6 +196,14 @@ public final class Compositor {
         mutateCurrentTab(() -> currentTab().createPane());
     }
 
+    public void createTiledPane(String workingDirectory) {
+        mutateCurrentTab(() -> currentTab().createTiledPane(workingDirectory));
+    }
+
+    public void createFloatingPaneInDirectory(String workingDirectory) {
+        mutateCurrentTab(() -> currentTab().createFloatingPaneInDirectory(workingDirectory));
+    }
+
     /**
      * Opens a floating pane running {@code command} directly (auto-closing when it exits), makes it
      * active, and returns it (null when no tab exists).

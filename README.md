@@ -152,6 +152,8 @@ editor_command = "vi {file}"
 [worktree]
 relative_worktree_path = "./.worktrees"
 split_regex = ","
+# One of: "", "cd", "create_panes", "create_panes_floating".
+post_create_action = ""
 
 [env.override]
 ZELLIJ_SESSION_NAME = ""
@@ -191,7 +193,9 @@ paste = "CTRL+SHIFT+V"
 - `Alt+s`: open the active pane scrollback in `$EDITOR`
 - `Alt+w`: edit one or more worktree names, split by `worktree.split_regex`, then run
   `git worktree add <relative_worktree_path>/<name>` for each name from the previously focused
-  pane's working directory
+  pane's working directory. `worktree.post_create_action` can then `cd` the previously active pane
+  to the last created worktree, create one tiled pane per worktree with `create_panes`, or create
+  one floating pane per worktree with `create_panes_floating`.
 - `Alt+y`: enter pane-sync selection mode, commit the selection, or stop an active pane sync
 - `Space`: toggle the focused pane in the sync set while pane-sync selection mode is active
 - Once committed, input typed or pasted into any synced pane is mirrored to the other synced panes

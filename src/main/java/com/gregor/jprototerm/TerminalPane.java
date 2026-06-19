@@ -16,6 +16,8 @@ import javafx.application.Platform;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.shape.Shape;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -42,8 +44,8 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
     private RenderStateSnapshot cachedSnapshot;
     private volatile ShellSession session;
     // Run once (on the FX thread) when this pane's process exits on its own, so the owning tab can
-    // remove it. Set by the Tab that creates the pane; null until then.
-    private Runnable onExit;
+    // remove it and command panes can run follow-up actions.
+    private final List<Runnable> onExitHandlers = new ArrayList<>();
     private boolean exited;
     // Clip region for rendering (rect minus the panes covering this one), set at layout time;
     // null means clip to the plain bounds. See RenderTarget#clip().
@@ -125,12 +127,20 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
 
     /** Sets the callback run when this pane's process exits on its own (see {@link #handleSessionExit}). */
     public void setOnExit(Runnable onExit) {
-        this.onExit = onExit;
+        onExitHandlers.clear();
+        addOnExit(onExit);
+    }
+
+    /** Adds a callback run when this pane's process exits on its own (see {@link #handleSessionExit}). */
+    public void addOnExit(Runnable onExit) {
+        if (onExit != null) {
+            onExitHandlers.add(onExit);
+        }
     }
 
     /**
      * Called from the shell reader thread when the pty stream ends without us closing it (the
-     * process exited). Hops to the FX thread and fires {@link #onExit} once, so tab/compositor
+     * process exited). Hops to the FX thread and fires the exit handlers once, so tab/compositor
      * mutation happens on the thread that owns the layout.
      */
     void handleSessionExit() {
@@ -139,8 +149,8 @@ public final class TerminalPane implements AutoCloseable, RenderTarget {
                 return;
             }
             exited = true;
-            if (onExit != null) {
-                onExit.run();
+            for (Runnable handler : List.copyOf(onExitHandlers)) {
+                handler.run();
             }
         });
     }

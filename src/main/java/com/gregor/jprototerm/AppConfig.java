@@ -31,6 +31,7 @@ public record AppConfig(
         String scrollbackEditorCommand,
         String worktreeRelativePath,
         String worktreeSplitRegex,
+        String worktreePostCreateAction,
         String closeSignal,
         Map<String, String> envOverride,
         Map<String, KeyBinding> keybindings
@@ -79,6 +80,7 @@ public record AppConfig(
                     stringValue(document, "scrollback.editor_command", defaults.scrollbackEditorCommand),
                     stringValue(document, "worktree.relative_worktree_path", defaults.worktreeRelativePath),
                     stringValue(document, "worktree.split_regex", defaults.worktreeSplitRegex),
+                    stringValue(document, "worktree.post_create_action", defaults.worktreePostCreateAction),
                     closeSignalValue(document, defaults.closeSignal),
                     envOverride(document, defaults.envOverride),
                     keybindings(document, defaults)
@@ -103,6 +105,7 @@ public record AppConfig(
                 defaultScrollbackEditorCommand(),
                 "./.worktrees",
                 ",",
+                "",
                 "SIGTERM",
                 Map.of(),
                 Map.ofEntries(
@@ -142,6 +145,7 @@ public record AppConfig(
                 scrollbackEditorCommand,
                 worktreeRelativePath,
                 worktreeSplitRegex,
+                worktreePostCreateAction,
                 closeSignal,
                 envOverride,
                 keybindings
@@ -246,7 +250,8 @@ public record AppConfig(
         builder.append("editor_command = ").append(quoted(scrollbackEditorCommand)).append("\n\n");
         builder.append("[worktree]\n");
         builder.append("relative_worktree_path = ").append(quoted(worktreeRelativePath)).append('\n');
-        builder.append("split_regex = ").append(quoted(worktreeSplitRegex)).append("\n\n");
+        builder.append("split_regex = ").append(quoted(worktreeSplitRegex)).append('\n');
+        builder.append("post_create_action = ").append(quoted(worktreePostCreateAction)).append("\n\n");
         builder.append("[env.override]\n");
         for (Map.Entry<String, String> entry : envOverride.entrySet()) {
             builder.append(entry.getKey()).append(" = ").append(quoted(entry.getValue())).append('\n');

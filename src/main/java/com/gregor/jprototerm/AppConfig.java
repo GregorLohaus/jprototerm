@@ -30,6 +30,7 @@ public record AppConfig(
         boolean kittyGraphics,
         String scrollbackEditorCommand,
         String worktreeRelativePath,
+        String worktreeSplitRegex,
         String closeSignal,
         Map<String, String> envOverride,
         Map<String, KeyBinding> keybindings
@@ -77,6 +78,7 @@ public record AppConfig(
                     booleanValue(document, "kitty_graphics.enabled", defaults.kittyGraphics),
                     stringValue(document, "scrollback.editor_command", defaults.scrollbackEditorCommand),
                     stringValue(document, "worktree.relative_worktree_path", defaults.worktreeRelativePath),
+                    stringValue(document, "worktree.split_regex", defaults.worktreeSplitRegex),
                     closeSignalValue(document, defaults.closeSignal),
                     envOverride(document, defaults.envOverride),
                     keybindings(document, defaults)
@@ -100,6 +102,7 @@ public record AppConfig(
                 true,
                 defaultScrollbackEditorCommand(),
                 "./.worktrees",
+                ",",
                 "SIGTERM",
                 Map.of(),
                 Map.ofEntries(
@@ -138,6 +141,7 @@ public record AppConfig(
                 kittyGraphics,
                 scrollbackEditorCommand,
                 worktreeRelativePath,
+                worktreeSplitRegex,
                 closeSignal,
                 envOverride,
                 keybindings
@@ -241,7 +245,8 @@ public record AppConfig(
         builder.append("[scrollback]\n");
         builder.append("editor_command = ").append(quoted(scrollbackEditorCommand)).append("\n\n");
         builder.append("[worktree]\n");
-        builder.append("relative_worktree_path = ").append(quoted(worktreeRelativePath)).append("\n\n");
+        builder.append("relative_worktree_path = ").append(quoted(worktreeRelativePath)).append('\n');
+        builder.append("split_regex = ").append(quoted(worktreeSplitRegex)).append("\n\n");
         builder.append("[env.override]\n");
         for (Map.Entry<String, String> entry : envOverride.entrySet()) {
             builder.append(entry.getKey()).append(" = ").append(quoted(entry.getValue())).append('\n');

@@ -313,14 +313,32 @@ final class TerminalWindow {
         if (relativePath == null || relativePath.isBlank()) {
             relativePath = "./.worktrees";
         }
+        String splitRegex = config.worktreeSplitRegex();
+        if (splitRegex == null || splitRegex.isBlank()) {
+            splitRegex = ",";
+        }
 
         return editorCommand(file)
                 + "; editor_status=$?"
-                + "; name=$(cat " + quotedFile + ")"
-                + "; if [ \"$editor_status\" -eq 0 ] && [ -n \"$name\" ]; then"
+                + "; git_status=$editor_status"
+                + "; if [ \"$editor_status\" -eq 0 ]; then"
+                + " if names_file=$(mktemp); then"
+                + " if awk -v re=" + shellQuote(splitRegex)
+                + " '{ text = text $0 \"\\n\" }"
+                + " END { n = split(text, names, re); for (i = 1; i <= n; i++)"
+                + " { name = names[i]; sub(/^[[:space:]]+/, \"\", name);"
+                + " sub(/[[:space:]]+$/, \"\", name); if (name != \"\") print name; } }'"
+                + " " + quotedFile + " > \"$names_file\"; then"
+                + " git_status=0"
+                + "; while IFS= read -r name; do"
                 + " git worktree add " + shellQuote(relativePath) + "/\"$name\""
-                + "; git_status=$?"
-                + "; else git_status=$editor_status"
+                + " || { git_status=$?; break; }"
+                + "; done < \"$names_file\""
+                + "; else git_status=$?"
+                + "; fi"
+                + "; rm -f \"$names_file\""
+                + "; else git_status=$?"
+                + "; fi"
                 + "; fi"
                 + "; rm -f " + quotedFile
                 + "; exit \"$git_status\"";

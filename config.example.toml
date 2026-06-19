@@ -21,6 +21,7 @@ editor_command = "vi {file}"
 
 [worktree]
 relative_worktree_path = "./.worktrees"
+split_regex = ","
 
 [env.override]
 ZELLIJ_SESSION_NAME = ""

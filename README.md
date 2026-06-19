@@ -151,6 +151,7 @@ editor_command = "vi {file}"
 
 [worktree]
 relative_worktree_path = "./.worktrees"
+split_regex = ","
 
 [env.override]
 ZELLIJ_SESSION_NAME = ""
@@ -188,8 +189,9 @@ paste = "CTRL+SHIFT+V"
 - `Alt+Shift+h` / `Alt+Shift+l`: previous / next tab
 - `Alt+t`: open the font selector
 - `Alt+s`: open the active pane scrollback in `$EDITOR`
-- `Alt+w`: edit a worktree name, then run `git worktree add <relative_worktree_path>/<name>`
-  from the previously focused pane's working directory
+- `Alt+w`: edit one or more worktree names, split by `worktree.split_regex`, then run
+  `git worktree add <relative_worktree_path>/<name>` for each name from the previously focused
+  pane's working directory
 - `Alt+y`: enter pane-sync selection mode, commit the selection, or stop an active pane sync
 - `Space`: toggle the focused pane in the sync set while pane-sync selection mode is active
 - Once committed, input typed or pasted into any synced pane is mirrored to the other synced panes

@@ -166,7 +166,7 @@ previous_tab = "ALT+SHIFT+H"
 next_tab = "ALT+SHIFT+L"
 open_font_selector = "ALT+T"
 open_scrollback = "ALT+S"
-open_worktree = "ALT+W"
+create_worktree = "ALT+W"
 ```
 
 ## Defaults

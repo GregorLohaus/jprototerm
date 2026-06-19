@@ -49,7 +49,7 @@ public record AppConfig(
             "next_tab",
             "open_font_selector",
             "open_scrollback",
-            "open_worktree",
+            "create_worktree",
             "paste"
     );
 
@@ -115,7 +115,7 @@ public record AppConfig(
                         Map.entry("next_tab", KeyBinding.parse("ALT+SHIFT+L")),
                         Map.entry("open_font_selector", KeyBinding.parse("ALT+T")),
                         Map.entry("open_scrollback", KeyBinding.parse("ALT+S")),
-                        Map.entry("open_worktree", KeyBinding.parse("ALT+W")),
+                        Map.entry("create_worktree", KeyBinding.parse("ALT+W")),
                         Map.entry("paste", KeyBinding.parse("CTRL+SHIFT+V"))
                 )
         );

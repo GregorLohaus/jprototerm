@@ -71,7 +71,7 @@ final class TerminalWindow {
         keyActions.put("next_tab", compositor::nextTab);
         keyActions.put("open_font_selector", this::openFontSelector);
         keyActions.put("open_scrollback", this::openScrollbackInEditor);
-        keyActions.put("open_worktree", this::openWorktreeInEditor);
+        keyActions.put("create_worktree", this::createWorktreeInEditor);
         keyActions.put("paste", this::pasteFromClipboard);
 
         StackPane root = new StackPane(compositor.canvas(), compositor.imageOverlay());
@@ -237,7 +237,7 @@ final class TerminalWindow {
         }
     }
 
-    private void openWorktreeInEditor() {
+    private void createWorktreeInEditor() {
         // The floating pane command inherits the active pane's cwd at creation time, so the git
         // worktree command runs from the pane that was focused before this shortcut opened.
         TerminalPane active = compositor.activePane();
@@ -250,7 +250,7 @@ final class TerminalWindow {
 
             compositor.openFloatingPane(worktreeEditorCommand(file));
         } catch (IOException ex) {
-            System.err.println("Could not open worktree editor: " + ex.getMessage());
+            System.err.println("Could not create worktree from editor input: " + ex.getMessage());
         }
     }
 

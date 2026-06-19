@@ -71,6 +71,7 @@ final class TerminalWindow {
         keyActions.put("next_tab", compositor::nextTab);
         keyActions.put("open_font_selector", this::openFontSelector);
         keyActions.put("open_scrollback", this::openScrollbackInEditor);
+        keyActions.put("create_worktree", this::createWorktreeInEditor);
         keyActions.put("paste", this::pasteFromClipboard);
 
         StackPane root = new StackPane(compositor.canvas(), compositor.imageOverlay());
@@ -230,13 +231,30 @@ final class TerminalWindow {
             // — no shell startup/rc race — and the pane auto-closes when the editor exits. The
             // trailing rm removes the file (which holds terminal contents) when the editor exits;
             // deleteOnExit would leak files for the JVM's whole lifetime in daemon mode.
-            compositor.openFloatingPane(scrollbackEditorCommand(file) + "; rm -f " + shellQuote(file.toString()));
+            compositor.openFloatingPane(editorCommand(file) + "; rm -f " + shellQuote(file.toString()));
         } catch (IOException ex) {
             System.err.println("Could not open scrollback in editor: " + ex.getMessage());
         }
     }
 
-    private String scrollbackEditorCommand(Path file) {
+    private void createWorktreeInEditor() {
+        // The floating pane command inherits the active pane's cwd at creation time, so the git
+        // worktree command runs from the pane that was focused before this shortcut opened.
+        TerminalPane active = compositor.activePane();
+        if (active == null) {
+            return;
+        }
+        try {
+            Path file = Files.createTempFile("jprototerm-worktree-", ".txt");
+            Files.writeString(file, "");
+
+            compositor.openFloatingPane(worktreeEditorCommand(file));
+        } catch (IOException ex) {
+            System.err.println("Could not create worktree from editor input: " + ex.getMessage());
+        }
+    }
+
+    private String editorCommand(Path file) {
         String quotedFile = shellQuote(file.toString());
         String command = config.scrollbackEditorCommand();
         if (command == null || command.isBlank()) {
@@ -246,6 +264,25 @@ final class TerminalWindow {
             return command.replace("{file}", quotedFile);
         }
         return command + " " + quotedFile;
+    }
+
+    private String worktreeEditorCommand(Path file) {
+        String quotedFile = shellQuote(file.toString());
+        String relativePath = config.worktreeRelativePath();
+        if (relativePath == null || relativePath.isBlank()) {
+            relativePath = "./.worktrees";
+        }
+
+        return editorCommand(file)
+                + "; editor_status=$?"
+                + "; name=$(cat " + quotedFile + ")"
+                + "; if [ \"$editor_status\" -eq 0 ] && [ -n \"$name\" ]; then"
+                + " git worktree add " + shellQuote(relativePath) + "/\"$name\""
+                + "; git_status=$?"
+                + "; else git_status=$editor_status"
+                + "; fi"
+                + "; rm -f " + quotedFile
+                + "; exit \"$git_status\"";
     }
 
     private static String shellQuote(String value) {

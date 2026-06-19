@@ -29,6 +29,7 @@ public record AppConfig(
         double windowHeight,
         boolean kittyGraphics,
         String scrollbackEditorCommand,
+        String worktreeRelativePath,
         String closeSignal,
         Map<String, String> envOverride,
         Map<String, KeyBinding> keybindings
@@ -48,6 +49,7 @@ public record AppConfig(
             "next_tab",
             "open_font_selector",
             "open_scrollback",
+            "create_worktree",
             "paste"
     );
 
@@ -72,6 +74,7 @@ public record AppConfig(
                     doubleValue(document, "window.height", defaults.windowHeight),
                     booleanValue(document, "kitty_graphics.enabled", defaults.kittyGraphics),
                     stringValue(document, "scrollback.editor_command", defaults.scrollbackEditorCommand),
+                    stringValue(document, "worktree.relative_worktree_path", defaults.worktreeRelativePath),
                     closeSignalValue(document, defaults.closeSignal),
                     envOverride(document, defaults.envOverride),
                     keybindings(document, defaults)
@@ -94,6 +97,7 @@ public record AppConfig(
                 760.0,
                 true,
                 defaultScrollbackEditorCommand(),
+                "./.worktrees",
                 "SIGTERM",
                 Map.of(),
                 Map.ofEntries(
@@ -111,6 +115,7 @@ public record AppConfig(
                         Map.entry("next_tab", KeyBinding.parse("ALT+SHIFT+L")),
                         Map.entry("open_font_selector", KeyBinding.parse("ALT+T")),
                         Map.entry("open_scrollback", KeyBinding.parse("ALT+S")),
+                        Map.entry("create_worktree", KeyBinding.parse("ALT+W")),
                         Map.entry("paste", KeyBinding.parse("CTRL+SHIFT+V"))
                 )
         );
@@ -128,6 +133,7 @@ public record AppConfig(
                 windowHeight,
                 kittyGraphics,
                 scrollbackEditorCommand,
+                worktreeRelativePath,
                 closeSignal,
                 envOverride,
                 keybindings
@@ -230,6 +236,8 @@ public record AppConfig(
         builder.append("enabled = ").append(kittyGraphics).append("\n\n");
         builder.append("[scrollback]\n");
         builder.append("editor_command = ").append(quoted(scrollbackEditorCommand)).append("\n\n");
+        builder.append("[worktree]\n");
+        builder.append("relative_worktree_path = ").append(quoted(worktreeRelativePath)).append("\n\n");
         builder.append("[env.override]\n");
         for (Map.Entry<String, String> entry : envOverride.entrySet()) {
             builder.append(entry.getKey()).append(" = ").append(quoted(entry.getValue())).append('\n');

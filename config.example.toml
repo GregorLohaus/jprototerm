@@ -19,6 +19,9 @@ enabled = true
 [scrollback]
 editor_command = "vi {file}"
 
+[worktree]
+relative_worktree_path = "./.worktrees"
+
 [env.override]
 ZELLIJ_SESSION_NAME = ""
 
@@ -28,9 +31,14 @@ navigate_down = "ALT+J"
 navigate_up = "ALT+K"
 navigate_right = "ALT+L"
 toggle_floating = "ALT+F"
-new_floating = "ALT+SHIFT+F"
+new_pane = "ALT+N"
 next_floating = "ALT+F12"
+promote_floating = "ALT+P"
 close_pane = "ALT+X"
+new_tab = "ALT+A"
+previous_tab = "ALT+SHIFT+H"
+next_tab = "ALT+SHIFT+L"
 open_font_selector = "ALT+T"
 open_scrollback = "ALT+S"
+create_worktree = "ALT+W"
 paste = "CTRL+SHIFT+V"

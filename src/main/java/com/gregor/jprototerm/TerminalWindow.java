@@ -72,6 +72,7 @@ final class TerminalWindow {
         keyActions.put("open_font_selector", this::openFontSelector);
         keyActions.put("open_scrollback", this::openScrollbackInEditor);
         keyActions.put("create_worktree", this::createWorktreeInEditor);
+        keyActions.put("pane_sync_start", compositor::startPaneSyncSelection);
         keyActions.put("pane_sync_select", compositor::togglePaneSyncSelection);
         keyActions.put("pane_sync_commit", compositor::commitPaneSyncSelection);
         keyActions.put("pane_sync_end", compositor::endPaneSync);
@@ -134,8 +135,12 @@ final class TerminalWindow {
 
     private void handlePressed(KeyEvent event) {
         for (Map.Entry<String, Runnable> action : keyActions.entrySet()) {
-            if (config.keybindings().get(action.getKey()).matches(event)) {
-                if (compositor.isPaneSyncSelecting() && !allowedDuringPaneSyncSelection(action.getKey())) {
+            String actionName = action.getKey();
+            if (config.keybindings().get(actionName).matches(event)) {
+                if (actionName.equals("pane_sync_select") && !compositor.isPaneSyncSelecting()) {
+                    continue;
+                }
+                if (compositor.isPaneSyncSelecting() && !allowedDuringPaneSyncSelection(actionName)) {
                     event.consume();
                     return;
                 }

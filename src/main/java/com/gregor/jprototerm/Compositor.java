@@ -144,14 +144,19 @@ public final class Compositor {
         return paneSyncSelectMode;
     }
 
-    public void togglePaneSyncSelection() {
-        TerminalPane active = activePane();
-        if (active == null) {
+    public void startPaneSyncSelection() {
+        if (activePane() == null || paneSyncSelectMode) {
             return;
         }
-        if (!paneSyncSelectMode) {
-            paneSyncSelectMode = true;
-            paneSyncSelection.clear();
+        paneSyncSelectMode = true;
+        paneSyncSelection.clear();
+        layoutVersion++;
+    }
+
+    public void togglePaneSyncSelection() {
+        TerminalPane active = activePane();
+        if (active == null || !paneSyncSelectMode) {
+            return;
         }
         if (!paneSyncSelection.add(active)) {
             paneSyncSelection.remove(active);

@@ -74,7 +74,6 @@ final class TerminalWindow {
         keyActions.put("create_worktree", this::createWorktreeInEditor);
         keyActions.put("pane_sync_toggle", compositor::togglePaneSync);
         keyActions.put("pane_sync_select", compositor::togglePaneSyncSelection);
-        keyActions.put("pane_sync_commit", compositor::commitPaneSyncSelection);
         keyActions.put("paste", this::pasteFromClipboard);
 
         StackPane root = new StackPane(compositor.canvas(), compositor.imageOverlay());
@@ -169,8 +168,7 @@ final class TerminalWindow {
                     "previous_tab",
                     "next_tab",
                     "pane_sync_toggle",
-                    "pane_sync_select",
-                    "pane_sync_commit" -> true;
+                    "pane_sync_select" -> true;
             default -> false;
         };
     }

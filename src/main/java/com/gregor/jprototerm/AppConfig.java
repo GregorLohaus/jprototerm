@@ -52,7 +52,6 @@ public record AppConfig(
             "create_worktree",
             "pane_sync_toggle",
             "pane_sync_select",
-            "pane_sync_commit",
             "paste"
     );
 
@@ -121,7 +120,6 @@ public record AppConfig(
                         Map.entry("create_worktree", KeyBinding.parse("ALT+W")),
                         Map.entry("pane_sync_toggle", KeyBinding.parse("ALT+Y")),
                         Map.entry("pane_sync_select", KeyBinding.parse("SPACE")),
-                        Map.entry("pane_sync_commit", KeyBinding.parse("ALT+SHIFT+Y")),
                         Map.entry("paste", KeyBinding.parse("CTRL+SHIFT+V"))
                 )
         );

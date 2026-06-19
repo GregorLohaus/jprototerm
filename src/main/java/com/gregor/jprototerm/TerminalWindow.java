@@ -385,16 +385,23 @@ final class TerminalWindow {
 
     private void createWorktreePanes(List<String> worktreePaths, boolean floating) {
         List<String> commands = config.worktreeCommands();
+        List<TerminalPane> createdPanes = new ArrayList<>();
         for (int i = 0; i < worktreePaths.size(); i++) {
             TerminalPane pane = floating
                     ? compositor.createFloatingPaneInDirectory(worktreePaths.get(i))
                     : compositor.createTiledPane(worktreePaths.get(i));
+            if (pane != null) {
+                createdPanes.add(pane);
+            }
             if (pane != null && !commands.isEmpty()) {
                 String command = commands.get(i % commands.size());
                 if (command != null && !command.isBlank()) {
                     pane.send(command + "\r");
                 }
             }
+        }
+        if (config.worktreeSyncPanes() && !createdPanes.isEmpty()) {
+            compositor.syncPanes(createdPanes);
         }
     }
 

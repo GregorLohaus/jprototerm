@@ -188,6 +188,19 @@ public final class Compositor {
                 .toList();
     }
 
+    public void syncPanes(List<TerminalPane> panes) {
+        paneSyncSelectMode = false;
+        paneSyncSelection.clear();
+        paneSyncPanes.clear();
+        for (TerminalPane pane : panes) {
+            if (pane != null) {
+                paneSyncPanes.add(pane);
+            }
+        }
+        prunePaneSyncState();
+        layoutVersion++;
+    }
+
     public void toggleFloating() {
         mutateCurrentTab(() -> currentTab().toggleFloating());
     }

@@ -530,17 +530,22 @@ public final class Compositor {
 
         gc.save();
         try {
-            gc.setLineWidth(4.0);
+            // Draw a thin sync border inset just inside the pane's own edge border, so the
+            // renderer's active (blue) / inactive border stays visible and you can still tell
+            // which synced pane is focused.
+            double lineWidth = 2.0;
+            double inset = 2.0 + lineWidth / 2.0; // clear the renderer's 2px active border
+            gc.setLineWidth(lineWidth);
             gc.setStroke(paneSyncSelectMode ? PANE_SYNC_SELECT_BORDER : PANE_SYNC_COMMITTED_BORDER);
             for (TerminalPane pane : panes) {
                 if (!highlighted.contains(pane)) {
                     continue;
                 }
                 gc.save();
-                double x = Math.round(pane.x()) + 2.0;
-                double y = Math.round(pane.y()) + 2.0;
-                double width = Math.max(0.0, pane.width() - 4.0);
-                double height = Math.max(0.0, pane.height() - 4.0);
+                double x = Math.round(pane.x()) + inset;
+                double y = Math.round(pane.y()) + inset;
+                double width = Math.max(0.0, pane.width() - 2.0 * inset);
+                double height = Math.max(0.0, pane.height() - 2.0 * inset);
                 TerminalRenderer.clip(gc, Math.round(pane.x()), Math.round(pane.y()), pane.width(), pane.height(), pane.clip());
                 gc.strokeRect(x, y, width, height);
                 gc.restore();

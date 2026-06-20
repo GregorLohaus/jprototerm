@@ -40,6 +40,8 @@ public final class Compositor {
     private static final Color TAB_TEXT = Color.rgb(225, 229, 235);
     private static final Color PANE_SYNC_SELECT_BORDER = Color.rgb(255, 183, 77);
     private static final Color PANE_SYNC_COMMITTED_BORDER = Color.rgb(105, 214, 128);
+    // Keep this narrower than the terminal renderer's active border so focus remains visible.
+    private static final double PANE_SYNC_BORDER_WIDTH = 1.0;
     // Thin tab strip shown at the top when more than one tab is open.
     private static final double TAB_BAR_HEIGHT = 22.0;
 
@@ -530,7 +532,7 @@ public final class Compositor {
 
         gc.save();
         try {
-            gc.setLineWidth(4.0);
+            gc.setLineWidth(PANE_SYNC_BORDER_WIDTH);
             gc.setStroke(paneSyncSelectMode ? PANE_SYNC_SELECT_BORDER : PANE_SYNC_COMMITTED_BORDER);
             for (TerminalPane pane : panes) {
                 if (!highlighted.contains(pane)) {
